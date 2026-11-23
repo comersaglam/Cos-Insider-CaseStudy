@@ -32,7 +32,8 @@ finds the commit that finished block NN.
 | [17](17-list-cancel-and-retry.md) | List, cancel and retry | 2026-11-23 | Keyset-paged list with filters, safe cancel, single and bulk retry | `44b22f8` |
 | [18](18-one-command-stack.md) | One-command stack | 2026-11-23 | A 23.5 MB distroless image; `docker compose up` migrates and serves the API | `b569c52` |
 | [19](19-rabbitmq-platform.md) | Platform: RabbitMQ | 2026-11-23 | Topology, confirmed mandatory publishing and consuming, tested against RabbitMQ 4.4.1 | `f1fb6b4` |
-| [20](20-outbox-relay-and-scheduler.md) | Dispatch: outbox relay and scheduler | 2026-11-23 | Outbox rows reach RabbitMQ at commit, woken by NOTIFY; due work is queued | this block's commit |
+| [20](20-outbox-relay-and-scheduler.md) | Dispatch: outbox relay and scheduler | 2026-11-23 | Outbox rows reach RabbitMQ at commit, woken by NOTIFY; due work is queued | `825c4bc` |
+| [21](21-provider-client.md) | Delivery: provider client | 2026-11-23 | One attempt to the provider, every answer classified | this block's commit |
 
 ## Template
 

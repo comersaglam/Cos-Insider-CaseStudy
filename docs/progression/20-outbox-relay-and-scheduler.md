@@ -1,7 +1,7 @@
 # 20. Dispatch: outbox relay and scheduler
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `825c4bc`
 - Decisions: [ADR 0021](../adr/0021-outbox-relay-and-scheduler.md)
 
 ## Goal

@@ -29,6 +29,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0019](0019-container-image-and-the-one-command-stack.md) | The container image and the one-command stack | Accepted |
 | [0020](0020-rabbitmq-platform.md) | The RabbitMQ platform layer: topology, publishing and consuming | Accepted |
 | [0021](0021-outbox-relay-and-scheduler.md) | The outbox relay and the scheduler | Accepted |
+| [0022](0022-provider-client.md) | The provider client | Accepted |
 
 ## Template
 

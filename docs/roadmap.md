@@ -119,6 +119,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Scope**: the webhook.site client (`to`, `channel`, `content`), timeout, `Idempotency-Key` and correlation
   headers, classification of outcomes ([ADR 0007](adr/0007-delivery-and-retry.md)), `Retry-After`.
 - **Tests**: an `httptest.Server` for every status code, a timeout, malformed JSON, an oversized body.
+- **Decided** ([ADR 0022](adr/0022-provider-client.md)): every 2xx succeeds, other 4xx and redirects are
+  permanent, an unreadable acceptance is still a success, answers are read up to 64 KB, 64 idle connections.
 
 ### 22. Delivery: consumer, rate limit, sending and retry
 - **Scope**: per-channel consumer under single active consumer; `x/time/rate` limiter; one goroutine per message
