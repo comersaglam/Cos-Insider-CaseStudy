@@ -61,15 +61,19 @@ func (h *Handler) RegisterRoutes(mux httpx.Mux) {
 
 // createRequest is the body of POST /v1/notifications. The member names are the provider contract's.
 type createRequest struct {
-	To       string `json:"to"`
-	Channel  string `json:"channel"`
-	Content  string `json:"content"`
-	Priority string `json:"priority"`
+	To          string     `json:"to"`
+	Channel     string     `json:"channel"`
+	Content     string     `json:"content"`
+	Priority    string     `json:"priority"`
+	ScheduledAt *time.Time `json:"scheduledAt"`
 }
 
 // draft turns the request into a draft; a priority left out means normal.
 func (req createRequest) draft() Draft {
-	d := Draft{To: req.To, Channel: Channel(req.Channel), Content: req.Content, Priority: Priority(req.Priority)}
+	d := Draft{
+		To: req.To, Channel: Channel(req.Channel), Content: req.Content, Priority: Priority(req.Priority),
+		ScheduledAt: req.ScheduledAt,
+	}
 	if d.Priority == "" {
 		d.Priority = PriorityNormal
 	}
@@ -97,6 +101,7 @@ type notificationResponse struct {
 	Status            Status        `json:"status"`
 	CorrelationID     string        `json:"correlationId"`
 	BatchID           *uuid.UUID    `json:"batchId,omitzero"`
+	ScheduledAt       *time.Time    `json:"scheduledAt,omitzero"`
 	FailedAt          *time.Time    `json:"failedAt,omitzero"`
 	Attempts          int           `json:"attempts"`
 	FailureReason     FailureReason `json:"failureReason,omitzero"`

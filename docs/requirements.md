@@ -48,7 +48,7 @@ The expected answer is `202 Accepted` with `{"messageId": "<uuid>", "status": "a
 | Bonus | Block |
 |---|---|
 | Failure handling | 13, 17, 22, 23 |
-| Scheduled notifications | 31 |
+| Scheduled notifications | 31, [0031](adr/0031-scheduled-notifications.md) |
 | Templates with variable substitution | 32 |
 | Real-time status updates over WebSocket | 33 |
 | Distributed tracing | 34 |

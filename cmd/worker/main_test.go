@@ -333,3 +333,28 @@ func TestCorrelationIDCrossesTheQueue(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// TestWorkerSendsAScheduledNotificationWhenItsTimeComes: a notification scheduled a moment ahead waits, untouched,
+// until then, and the scheduler then queues it and a consumer sends it.
+func TestWorkerSendsAScheduledNotificationWhenItsTimeComes(t *testing.T) {
+	p := &provider{calls: map[string]int{}, keys: map[string]string{}, answer: func(string) int { return http.StatusAccepted }}
+	svc, store, _, _ := startWorker(t, p, nil)
+
+	at := time.Now().Add(1500 * time.Millisecond)
+	n, _, err := svc.Create(t.Context(), notification.Draft{
+		To: "+905551234567", Channel: notification.ChannelSMS, Content: "Flash sale starts now.",
+		Priority: notification.PriorityNormal, ScheduledAt: &at,
+	}, "")
+	if err != nil || n.Status != notification.StatusScheduled {
+		t.Fatalf("Create = %s, %v; want scheduled", n.Status, err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if got, _ := store.Get(t.Context(), n.ID); got.Status != notification.StatusScheduled || p.count("+905551234567") != 0 {
+		t.Fatalf("before its time: %s, %d sends; want scheduled and none", got.Status, p.count("+905551234567"))
+	}
+
+	sent := waitForStatus(t, store, n.ID, notification.StatusSent)
+	if sent.UpdatedAt.Before(at) {
+		t.Errorf("sent at %v, before its time %v", sent.UpdatedAt, at)
+	}
+}

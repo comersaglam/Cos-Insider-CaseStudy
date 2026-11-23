@@ -131,7 +131,9 @@ func TestConcurrentDrainsPublishEachRowOnce(t *testing.T) {
 // makeWaiting puts a notification in a waiting status with its due time, as the worker or a scheduled create will.
 func makeWaiting(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, s Status, due time.Time) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = $2, next_attempt_at = $3 WHERE id = $1", id, string(s), due); err != nil {
+	// A scheduled notification also keeps the time it was scheduled for.
+	if _, err := pool.Exec(t.Context(), `UPDATE notifications SET status = $2, next_attempt_at = $3,
+		scheduled_at = CASE WHEN $2 = 'scheduled' THEN $3 ELSE scheduled_at END WHERE id = $1`, id, string(s), due); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -38,6 +38,8 @@ func (s *Store) Create(ctx context.Context, n Notification, idem IdempotencyKey)
 		Priority:      string(n.Priority),
 		Status:        string(n.Status),
 		CorrelationID: n.CorrelationID,
+		ScheduledAt:   n.ScheduledAt,
+		NextAttemptAt: dueAt(n),
 	}
 	if idem.Key != "" {
 		params.IdempotencyKey = &idem.Key
@@ -62,8 +64,11 @@ func (s *Store) Create(ctx context.Context, n Notification, idem IdempotencyKey)
 		if err != nil {
 			return fmt.Errorf("insert notification: %w", err)
 		}
-		if err := q.InsertOutbox(ctx, row.ID); err != nil {
-			return fmt.Errorf("insert outbox row: %w", err)
+		// A scheduled notification waits for the scheduler (ADR 0006); only one due now goes to the outbox.
+		if n.Status == StatusQueued {
+			if err := q.InsertOutbox(ctx, row.ID); err != nil {
+				return fmt.Errorf("insert outbox row: %w", err)
+			}
 		}
 		stored, created = fromRow(row), true
 		return nil
@@ -95,6 +100,7 @@ func fromRow(r db.Notification) Notification {
 		Status:            Status(r.Status),
 		CorrelationID:     r.CorrelationID,
 		BatchID:           r.BatchID,
+		ScheduledAt:       utc(r.ScheduledAt),
 		FailedAt:          utc(r.FailedAt),
 		Attempts:          r.Attempts,
 		FailureReason:     FailureReason(deref(r.FailureReason)),
@@ -102,6 +108,14 @@ func fromRow(r db.Notification) Notification {
 		CreatedAt:         r.CreatedAt.UTC(),
 		UpdatedAt:         r.UpdatedAt.UTC(),
 	}
+}
+
+// dueAt is when the scheduler should queue n: its scheduled time while it is scheduled, otherwise never (nil).
+func dueAt(n Notification) *time.Time {
+	if n.Status == StatusScheduled {
+		return n.ScheduledAt
+	}
+	return nil
 }
 
 // utc returns t in UTC, or nil.

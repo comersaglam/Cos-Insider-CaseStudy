@@ -3,8 +3,8 @@
 [![CI](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml/badge.svg)](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml)
 
 A Go service that accepts notifications through an HTTP API and delivers them over SMS, e-mail and push through an
-external provider: queue workers, a per-channel rate limit, priorities, retries with backoff, a circuit breaker,
-idempotency, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
+external provider: queue workers, a per-channel rate limit, priorities, scheduling, retries with backoff, a circuit
+breaker, idempotency, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
 the brief is restated in [docs/requirements.md](docs/requirements.md).
 
 ## Quick start
@@ -86,6 +86,10 @@ curl -i -X POST localhost:8080/v1/notifications \
 
 # The same request again returns the same notification, marked Idempotent-Replayed: true.
 
+# Schedule one, up to 30 days ahead: it waits as scheduled, then is sent; it can be cancelled until then.
+curl -s -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' \
+  -d '{"to":"+905551234567","channel":"sms","content":"Flash sale starts now.","scheduledAt":"2026-11-24T09:00:00+03:00"}'
+
 # Read it: status, attempts, and once sent, the provider's message ID.
 curl -s localhost:8080/v1/notifications/<id>
 
@@ -165,6 +169,7 @@ modular monolith: packages by feature under `internal/`, infrastructure under `i
 | 100 messages per second per channel | a single active consumer per channel queue with a rate limiter |
 | Priority queues | RabbitMQ priority queues; high before normal before low within a channel |
 | Content validation | per-channel recipient format and length limits, every invalid field reported |
+| Scheduled notifications (bonus) | `scheduledAt`, up to 30 days ahead; waits in PostgreSQL and is queued when due |
 | Idempotency | `Idempotency-Key` on create and batch; the notification's ID sent to the provider; claims under a lease |
 | Retries | exponential backoff with full jitter, `Retry-After` honoured, a circuit breaker per channel, single and bulk retry by hand |
 | Real-time metrics | `/v1/metrics` (queue depth, success rate, latency percentiles) and Prometheus `/metrics` on both processes |
@@ -232,5 +237,5 @@ verification and commits, and [docs/roadmap.md](docs/roadmap.md) holds the plan.
 - **Authentication**: the brief does not ask for it; it would sit in a gateway in front, or in one middleware.
 - **Exactly-once delivery**: not possible with a provider that is called over HTTP; delivery is at least once, and
   the provider receives an idempotency key to drop repeats.
-- **Scheduled notifications, templates, WebSocket updates and tracing** are the brief's optional bonuses, planned
-  in the [roadmap](docs/roadmap.md).
+- **Templates, WebSocket updates and tracing** are the brief's optional bonuses, planned in the
+  [roadmap](docs/roadmap.md).

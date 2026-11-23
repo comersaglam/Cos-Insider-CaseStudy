@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDraftValidate(t *testing.T) {
@@ -88,7 +89,7 @@ func TestDraftValidate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := valid
 			tt.edit(&d)
-			if got := fieldCodes(t, d.Validate()); !slices.Equal(got, tt.want) {
+			if got := fieldCodes(t, d.Validate(testNow)); !slices.Equal(got, tt.want) {
 				t.Errorf("Validate() = %v, want %v", got, tt.want)
 			}
 		})
@@ -99,13 +100,13 @@ func TestDraftValidate(t *testing.T) {
 // non-nil interface holding a nil pointer, so err != nil would be true for a valid draft.
 func TestDraftValidateReturnsNilWhenValid(t *testing.T) {
 	d := Draft{To: "+905551234567", Channel: ChannelSMS, Content: "hi", Priority: PriorityLow}
-	if err := d.Validate(); err != nil {
+	if err := d.Validate(testNow); err != nil {
 		t.Fatalf("Validate() = %#v, want nil", err)
 	}
 }
 
 func TestValidationErrorMessage(t *testing.T) {
-	err := Draft{Channel: ChannelSMS, To: "123", Content: "hi", Priority: PriorityHigh}.Validate()
+	err := Draft{Channel: ChannelSMS, To: "123", Content: "hi", Priority: PriorityHigh}.Validate(testNow)
 	want := "invalid notification: to: must be an E.164 phone number such as +905551234567"
 	if err == nil || err.Error() != want {
 		t.Errorf("Error() = %v, want %q", err, want)
@@ -136,4 +137,40 @@ func emailOfLength(n int) string {
 	label := strings.Repeat("x", 63)
 	prefix := "ayse@" + label + "." + label + "." + label + "."
 	return prefix + strings.Repeat("x", n-len(prefix))
+}
+
+// testNow is the moment drafts are validated at in these tests.
+var testNow = time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
+
+// TestDraftSchedule: a time in the future makes the notification wait until then, up to MaxScheduleAhead; a time
+// that has come, or none, sends it now.
+func TestDraftSchedule(t *testing.T) {
+	at := func(d time.Duration) *time.Time {
+		v := testNow.Add(d)
+		return &v
+	}
+	tests := []struct {
+		name        string
+		scheduledAt *time.Time
+		want        []string
+		status      Status
+	}{
+		{"not scheduled", nil, nil, StatusQueued},
+		{"a time that has passed is sent now", at(-time.Hour), nil, StatusQueued},
+		{"now is sent now", at(0), nil, StatusQueued},
+		{"tomorrow", at(24 * time.Hour), nil, StatusScheduled},
+		{"at the horizon", at(MaxScheduleAhead), nil, StatusScheduled},
+		{"past the horizon", at(MaxScheduleAhead + time.Second), []string{"scheduledAt:invalid"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := Draft{To: "+905551234567", Channel: ChannelSMS, Content: "hi", Priority: PriorityNormal, ScheduledAt: tt.scheduledAt}
+			if got := fieldCodes(t, d.Validate(testNow)); !slices.Equal(got, tt.want) {
+				t.Errorf("Validate = %v, want %v", got, tt.want)
+			}
+			if tt.want == nil && d.Status(testNow) != tt.status {
+				t.Errorf("Status = %s, want %s", d.Status(testNow), tt.status)
+			}
+		})
+	}
 }

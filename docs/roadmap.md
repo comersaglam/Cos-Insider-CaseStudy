@@ -214,7 +214,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 | # | Bonus | Note |
 |---|---|---|
-| 31 | Scheduled notifications | The mechanism exists ([ADR 0006](adr/0006-delayed-work-waits-in-postgresql.md)); a `scheduledAt` field, its validation and cancellation. |
+| 31 | Scheduled notifications | The mechanism exists ([ADR 0006](adr/0006-delayed-work-waits-in-postgresql.md)); a `scheduledAt` field, its validation and cancellation. Decided in [ADR 0031](adr/0031-scheduled-notifications.md): up to 30 days ahead, a time already come sent at once. |
 | 32 | Templates | `text/template`; a templates table with CRUD; a missing variable is an error. |
 | 33 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. |
 | 34 | Distributed tracing | OpenTelemetry propagated over HTTP and AMQP headers; Jaeger in Compose. |

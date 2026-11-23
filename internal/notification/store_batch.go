@@ -73,14 +73,17 @@ func (s *Store) CreateBatch(ctx context.Context, b NewBatch, idem IdempotencyKey
 		}
 
 		notifications := make([]db.CopyBatchNotificationsParams, len(b.Items))
-		outbox := make([]uuid.UUID, len(b.Items))
+		var outbox []uuid.UUID
 		for i, item := range b.Items {
 			n, index := item.Notification, item.Index
 			notifications[i] = db.CopyBatchNotificationsParams{
 				ID: n.ID, Channel: string(n.Channel), Recipient: n.To, Content: n.Content, Priority: string(n.Priority),
 				Status: string(n.Status), CorrelationID: n.CorrelationID, BatchID: &row.ID, BatchIndex: &index,
+				ScheduledAt: n.ScheduledAt, NextAttemptAt: dueAt(n),
 			}
-			outbox[i] = n.ID
+			if n.Status == StatusQueued {
+				outbox = append(outbox, n.ID)
+			}
 		}
 		if _, err := q.CopyBatchNotifications(ctx, notifications); err != nil {
 			return fmt.Errorf("copy the batch's notifications: %w", err)

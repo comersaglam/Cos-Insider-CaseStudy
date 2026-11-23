@@ -1,10 +1,12 @@
 -- name: InsertNotification :one
 -- Inserts a notification unless its idempotency key is taken, in which case it returns no row.
 INSERT INTO notifications (
-    id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id
+    id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id,
+    scheduled_at, next_attempt_at
 ) VALUES (
     @id, @channel, @recipient, @content, @priority, @status,
-    sqlc.narg(idempotency_key), sqlc.narg(request_hash), @correlation_id
+    sqlc.narg(idempotency_key), sqlc.narg(request_hash), @correlation_id,
+    sqlc.narg(scheduled_at), sqlc.narg(next_attempt_at)
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 RETURNING *;
@@ -27,9 +29,11 @@ RETURNING *;
 
 -- name: CopyBatchNotifications :copyfrom
 INSERT INTO notifications (
-    id, channel, recipient, content, priority, status, correlation_id, batch_id, batch_index
+    id, channel, recipient, content, priority, status, correlation_id, batch_id, batch_index,
+    scheduled_at, next_attempt_at
 ) VALUES (
-    @id, @channel, @recipient, @content, @priority, @status, @correlation_id, @batch_id, @batch_index
+    @id, @channel, @recipient, @content, @priority, @status, @correlation_id, @batch_id, @batch_index,
+    @scheduled_at, @next_attempt_at
 );
 
 -- name: CopyOutbox :copyfrom

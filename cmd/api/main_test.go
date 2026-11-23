@@ -351,3 +351,31 @@ func TestAPIListCancelRetryEndToEnd(t *testing.T) {
 		t.Errorf("bad query = %d %v", status, p)
 	}
 }
+
+// TestAPIScheduledEndToEnd: a notification scheduled ahead is stored as scheduled with its time, listed under that
+// status, and can be cancelled before its time; a time too far ahead is refused.
+func TestAPIScheduledEndToEnd(t *testing.T) {
+	base, _ := startAPI(t)
+	at := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	status, _, created := call(t, http.MethodPost, base+"/v1/notifications",
+		`{"to":"+905551234567","channel":"sms","content":"Flash sale starts now.","scheduledAt":"`+at.Format(time.RFC3339)+`"}`, nil)
+	if status != http.StatusAccepted || created["status"] != "scheduled" || created["scheduledAt"] != at.Format(time.RFC3339) {
+		t.Fatalf("create = %d %v", status, created)
+	}
+	id, _ := created["id"].(string)
+
+	_, _, page := call(t, http.MethodGet, base+"/v1/notifications?status=scheduled", "", nil)
+	if items, _ := page["items"].([]any); len(items) != 1 {
+		t.Errorf("listed %d scheduled notifications, want 1", len(items))
+	}
+	if status, _, cancelled := call(t, http.MethodPost, base+"/v1/notifications/"+id+"/cancel", "", nil); status != http.StatusOK || cancelled["status"] != "cancelled" {
+		t.Errorf("cancel = %d %v", status, cancelled["status"])
+	}
+
+	tooFar := time.Now().Add(31 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	status, _, problem := call(t, http.MethodPost, base+"/v1/notifications",
+		`{"to":"+905551234567","channel":"sms","content":"hi","scheduledAt":"`+tooFar+`"}`, nil)
+	if errs, _ := problem["errors"].([]any); status != http.StatusUnprocessableEntity || len(errs) != 1 {
+		t.Errorf("too far ahead = %d %v, want 422 naming scheduledAt", status, problem)
+	}
+}

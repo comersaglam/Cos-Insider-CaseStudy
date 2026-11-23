@@ -41,7 +41,8 @@ func NewService(s store, log *slog.Logger) *Service {
 // the same key with a different request is refused with ErrIdempotencyKeyReused. An invalid draft is refused with
 // a *ValidationError and nothing is stored.
 func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n Notification, created bool, err error) {
-	if err := d.Validate(); err != nil {
+	now := time.Now()
+	if err := d.Validate(now); err != nil {
 		return Notification{}, false, err
 	}
 
@@ -57,7 +58,8 @@ func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n
 		Channel:       d.Channel,
 		Content:       d.Content,
 		Priority:      d.Priority,
-		Status:        StatusQueued,
+		Status:        d.Status(now),
+		ScheduledAt:   d.ScheduledAt,
 		CorrelationID: correlationID,
 	}, idem)
 	if err != nil {
@@ -90,8 +92,9 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 
 	correlationID := correlationIDOf(ctx)
 	nb := NewBatch{ID: uuid.NewV7(), Total: len(drafts), CorrelationID: correlationID}
+	now := time.Now()
 	for i, d := range drafts {
-		if err := d.Validate(); err != nil {
+		if err := d.Validate(now); err != nil {
 			verr, ok := errors.AsType[*ValidationError](err)
 			if !ok {
 				return Batch{}, false, err
@@ -101,7 +104,7 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 		}
 		nb.Items = append(nb.Items, NewBatchItem{Index: i, Notification: Notification{
 			ID: uuid.NewV7(), To: d.To, Channel: d.Channel, Content: d.Content, Priority: d.Priority,
-			Status: StatusQueued, CorrelationID: correlationID,
+			Status: d.Status(now), ScheduledAt: d.ScheduledAt, CorrelationID: correlationID,
 		}})
 	}
 	if len(nb.Items) == 0 {

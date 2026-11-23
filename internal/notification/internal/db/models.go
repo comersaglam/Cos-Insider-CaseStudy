@@ -52,6 +52,7 @@ type Notification struct {
 	ClaimedUntil      *time.Time
 	FailureReason     *string
 	ProviderMessageID *string
+	ScheduledAt       *time.Time
 }
 
 type Outbox struct {

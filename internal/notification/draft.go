@@ -5,6 +5,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -57,24 +58,30 @@ func (e *ValidationError) Error() string {
 	return "invalid notification: " + strings.Join(parts, "; ")
 }
 
+// MaxScheduleAhead is how far ahead a notification may be scheduled: far enough for a campaign planned weeks ahead,
+// near enough that a mistyped year is refused rather than kept for decades.
+const MaxScheduleAhead = 30 * 24 * time.Hour
+
 // Draft is a notification as a client asks for it, before it is stored. To, Channel and Content are exactly what
-// the provider receives; Priority orders the work and is not sent.
+// the provider receives; Priority orders the work and ScheduledAt delays it, and neither is sent.
 type Draft struct {
-	To       string
-	Channel  Channel
-	Content  string
-	Priority Priority
+	To          string
+	Channel     Channel
+	Content     string
+	Priority    Priority
+	ScheduledAt *time.Time
 }
 
-// Validate checks every field of d and returns a *ValidationError listing each one that breaks a rule, or nil
-// when d is valid. A recipient and content are checked against the rules of d's channel.
-func (d Draft) Validate() error {
+// Validate checks every field of d at the moment now and returns a *ValidationError listing each one that breaks a
+// rule, or nil when d is valid. A recipient and content are checked against the rules of d's channel.
+func (d Draft) Validate(now time.Time) error {
 	var fields []FieldError
 	for _, fe := range []*FieldError{
 		checkChannel(d.Channel),
 		checkRecipient(d.Channel, d.To),
 		checkContent(d.Channel, d.Content),
 		checkPriority(d.Priority),
+		checkSchedule(d.ScheduledAt, now),
 	} {
 		if fe != nil {
 			fields = append(fields, *fe)
@@ -85,6 +92,23 @@ func (d Draft) Validate() error {
 		return nil
 	}
 	return &ValidationError{Fields: fields}
+}
+
+// Status is the status d starts in at the moment now: scheduled while its time is ahead, queued otherwise. A time
+// that has already come is sent at once rather than refused, so a client's clock running a little behind does not
+// fail its requests.
+func (d Draft) Status(now time.Time) Status {
+	if d.ScheduledAt != nil && d.ScheduledAt.After(now) {
+		return StatusScheduled
+	}
+	return StatusQueued
+}
+
+func checkSchedule(at *time.Time, now time.Time) *FieldError {
+	if at != nil && at.Sub(now) > MaxScheduleAhead {
+		return &FieldError{Field: "scheduledAt", Code: CodeInvalid, Message: "must be at most 30 days ahead"}
+	}
+	return nil
 }
 
 func checkChannel(c Channel) *FieldError {

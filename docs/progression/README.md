@@ -42,7 +42,8 @@ finds the commit that finished block NN.
 | [27](27-correlation-across-the-queue.md) | Correlation across the queue | 2026-11-23 | One correlation ID follows a notification from the API to the provider and the worker's log | `30f26c2` |
 | [28](28-openapi-and-swagger-ui.md) | OpenAPI and Swagger UI | 2026-11-23 | A detailed contract, checked against every answer the tests see, rendered at `/docs` | `9fe660f` |
 | [29](29-readme.md) | README | 2026-11-23 | Setup, run and test through make first; the API, how it works and how it meets the brief | `dfa42c1` |
-| [30](30-ci.md) | CI | 2026-11-23 | Lint, test and image build on every push; the image published on a version tag | this block's commit |
+| [30](30-ci.md) | CI | 2026-11-23 | Lint, test and image build on every push; the image published on a version tag | `f4f7589` |
+| [31](31-scheduled-notifications.md) | Scheduled notifications | 2026-11-23 | `scheduledAt` up to 30 days ahead; the notification waits in PostgreSQL and is sent when due | this block's commit |
 
 ## Template
 
