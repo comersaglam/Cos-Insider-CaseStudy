@@ -15,19 +15,15 @@ import (
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 )
 
-// noNotifications is a notification service that knows no notification.
-type noNotifications struct{}
-
-func (noNotifications) Create(context.Context, notification.Draft, string) (notification.Notification, bool, error) {
-	return notification.Notification{}, false, nil
+// noNotifications is a notification service that knows no notification. Embedding *notification.Service gives
+// it every method the handlers need, however many there are; only Get and GetBatch are called here, and both are
+// overridden, so the nil service underneath is never reached.
+type noNotifications struct {
+	*notification.Service
 }
 
 func (noNotifications) Get(context.Context, uuid.UUID) (notification.Notification, error) {
 	return notification.Notification{}, notification.ErrNotFound
-}
-
-func (noNotifications) CreateBatch(context.Context, []notification.Draft, string) (notification.Batch, bool, error) {
-	return notification.Batch{}, false, nil
 }
 
 func (noNotifications) GetBatch(context.Context, uuid.UUID) (notification.Batch, error) {

@@ -1,7 +1,7 @@
 # 16. Batch create and batch status
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `78e1dcb`
 - Decisions: [ADR 0017](../adr/0017-batches.md)
 
 ## Goal

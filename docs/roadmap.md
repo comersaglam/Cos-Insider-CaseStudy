@@ -78,8 +78,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   channel, batch and a required time window, with `dryRun` and a cap per request ([ADR 0014](adr/0014-dead-letters-and-replay.md)).
 - **Tests**: filter combinations; no row lost or repeated across pages when timestamps tie; cancel racing a send;
   bulk replay requeues only `failed` rows inside the window, `dryRun` changes nothing, the cap holds.
-- **Watch**: cancel is one conditional `UPDATE`, so the database settles the race; cursors are opaque.
-- **Migration**: the `(created_at, id)` index the list pages over, and the time a notification failed.
+- **Migration**: the `(created_at, id)` index the list pages over, and `failed_at`.
+- **Decided** ([ADR 0018](adr/0018-listing-cancelling-and-retrying.md)): newest first, 50 per page up to 100,
+  unknown parameters refused; cancel repeatable, `409` once sending; bulk retry capped at 10,000 per request.
 
 ### 18. One-command stack
 - **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate`, `api` and `worker`
@@ -125,6 +126,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   a message that panics ends in `failed` after its attempts; backoff bounds; the deadlock guard (a full semaphore
   with pending results); `-race`.
 - **Migration**: `attempts`, `claimed_until`, `failure_reason`, the provider's message ID, and `delivery_attempts`.
+  Single and bulk retry then reset `attempts` as they requeue.
 
 ### 23. Circuit breaker and pausing the pull
 - **Scope**: `sony/gobreaker` per channel; while open the consumer takes no deliveries; half-open probe.

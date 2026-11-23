@@ -1,6 +1,9 @@
 package notification
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 var allStatuses = []Status{
 	StatusScheduled, StatusQueued, StatusSending, StatusRetrying, StatusSent, StatusFailed, StatusCancelled,
@@ -41,6 +44,22 @@ func TestStatusCanTransitionTo(t *testing.T) {
 			if got := from.CanTransitionTo(to); got != want {
 				t.Errorf("%s.CanTransitionTo(%s) = %v, want %v", from, to, got, want)
 			}
+		}
+	}
+}
+
+func TestStatusesThatCanBecome(t *testing.T) {
+	tests := []struct {
+		target Status
+		want   []Status
+	}{
+		{StatusCancelled, []Status{StatusScheduled, StatusQueued, StatusRetrying}},
+		{StatusQueued, []Status{StatusScheduled, StatusRetrying, StatusFailed}},
+		{StatusScheduled, nil},
+	}
+	for _, tt := range tests {
+		if got := StatusesThatCanBecome(tt.target); !slices.Equal(got, tt.want) {
+			t.Errorf("StatusesThatCanBecome(%s) = %v, want %v", tt.target, got, tt.want)
 		}
 	}
 }

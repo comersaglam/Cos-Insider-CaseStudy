@@ -25,6 +25,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0015](0015-storage-ids-and-idempotency.md) | Storage: identifiers, idempotency and schema conventions | Accepted |
 | [0016](0016-http-api-and-the-api-process.md) | The HTTP API and the API process | Accepted |
 | [0017](0017-batches.md) | Batches: partial acceptance, kept rejections and a body limit | Accepted |
+| [0018](0018-listing-cancelling-and-retrying.md) | Listing, cancelling and retrying | Accepted |
 
 ## Template
 

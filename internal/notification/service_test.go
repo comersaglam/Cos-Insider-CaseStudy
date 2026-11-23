@@ -22,6 +22,33 @@ type fakeStore struct {
 	batchKeys     []IdempotencyKey
 	storedBatch   Batch
 	batchNotFound bool
+
+	listed       []Notification // what List answers, before the limit
+	listLimits   []int
+	failedCount  int
+	requeueLimit int
+}
+
+func (f *fakeStore) List(_ context.Context, _ ListFilter, _ *Cursor, limit int) ([]Notification, error) {
+	f.listLimits = append(f.listLimits, limit)
+	return f.listed[:min(limit, len(f.listed))], f.err
+}
+
+func (f *fakeStore) Cancel(_ context.Context, id uuid.UUID) (Notification, error) {
+	return Notification{ID: id, Status: StatusCancelled}, f.err
+}
+
+func (f *fakeStore) Retry(_ context.Context, id uuid.UUID) (Notification, error) {
+	return Notification{ID: id, Status: StatusQueued}, f.err
+}
+
+func (f *fakeStore) CountFailed(context.Context, RetryFilter) (int, error) {
+	return f.failedCount, f.err
+}
+
+func (f *fakeStore) RequeueFailed(_ context.Context, _ RetryFilter, maxRows int) (int, error) {
+	f.requeueLimit = maxRows
+	return min(maxRows, f.failedCount), f.err
 }
 
 func (f *fakeStore) Create(_ context.Context, n Notification, idem IdempotencyKey) (Notification, bool, error) {

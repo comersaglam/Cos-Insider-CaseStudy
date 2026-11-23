@@ -25,6 +25,11 @@ const (
 	StatusCancelled Status = "cancelled"
 )
 
+// lifecycle holds every status in the order a notification meets them; it gives lists of statuses a stable order.
+var lifecycle = []Status{
+	StatusScheduled, StatusQueued, StatusSending, StatusRetrying, StatusSent, StatusFailed, StatusCancelled,
+}
+
 // transitions lists, for every status, the statuses it may move to.
 var transitions = map[Status][]Status{
 	StatusScheduled: {StatusQueued, StatusCancelled},
@@ -45,4 +50,16 @@ func (s Status) Valid() bool {
 // CanTransitionTo reports whether a notification in status s may move to status next.
 func (s Status) CanTransitionTo(next Status) bool {
 	return slices.Contains(transitions[s], next)
+}
+
+// StatusesThatCanBecome returns, in lifecycle order, the statuses from which a notification may move to target. A
+// conditional UPDATE takes its WHERE clause from it, so the transition table stays the one source of the rules.
+func StatusesThatCanBecome(target Status) []Status {
+	var from []Status
+	for _, s := range lifecycle {
+		if s.CanTransitionTo(target) {
+			from = append(from, s)
+		}
+	}
+	return from
 }

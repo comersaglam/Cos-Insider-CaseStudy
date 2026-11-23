@@ -15,6 +15,8 @@ type Notification struct {
 	Priority      Priority
 	Status        Status
 	CorrelationID string
+	BatchID       *uuid.UUID // the batch it came in, or nil
+	FailedAt      *time.Time // when it failed, while it is failed
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

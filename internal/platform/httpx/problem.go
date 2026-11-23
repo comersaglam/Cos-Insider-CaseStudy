@@ -26,12 +26,14 @@ type Problem struct {
 	Errors        []FieldProblem `json:"errors,omitempty"`
 }
 
-// FieldProblem is one part of the request that broke a rule. Pointer locates it as a JSON Pointer (RFC 6901),
-// such as "/to" or "/notifications/3/content", as RFC 9457's own example does.
+// FieldProblem is one part of the request that broke a rule. A member of the body is located by Pointer, a JSON
+// Pointer (RFC 6901) such as "/to" or "/notifications/3/content", as RFC 9457's own example does; a query
+// parameter, which a pointer cannot reach, by Parameter, its name.
 type FieldProblem struct {
-	Pointer string `json:"pointer"`
-	Code    string `json:"code"`
-	Detail  string `json:"detail"`
+	Pointer   string `json:"pointer,omitzero"`
+	Parameter string `json:"parameter,omitzero"`
+	Code      string `json:"code"`
+	Detail    string `json:"detail"`
 }
 
 // NewProblem returns a problem with the given HTTP status, stable code and human-readable detail.

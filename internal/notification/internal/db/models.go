@@ -35,6 +35,7 @@ type Notification struct {
 	UpdatedAt      time.Time
 	BatchID        *uuid.UUID
 	BatchIndex     *int
+	FailedAt       *time.Time
 }
 
 type Outbox struct {

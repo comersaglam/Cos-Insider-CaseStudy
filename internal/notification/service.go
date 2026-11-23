@@ -16,6 +16,11 @@ type store interface {
 	Get(ctx context.Context, id uuid.UUID) (Notification, error)
 	CreateBatch(ctx context.Context, b NewBatch, idem IdempotencyKey) (Batch, bool, error)
 	GetBatch(ctx context.Context, id uuid.UUID) (Batch, error)
+	List(ctx context.Context, f ListFilter, after *Cursor, limit int) ([]Notification, error)
+	Cancel(ctx context.Context, id uuid.UUID) (Notification, error)
+	Retry(ctx context.Context, id uuid.UUID) (Notification, error)
+	CountFailed(ctx context.Context, f RetryFilter) (int, error)
+	RequeueFailed(ctx context.Context, f RetryFilter, maxRows int) (int, error)
 }
 
 // Service holds the notification use cases. It knows the rules; it neither reads requests nor writes SQL.

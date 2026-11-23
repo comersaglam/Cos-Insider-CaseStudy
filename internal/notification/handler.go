@@ -25,6 +25,10 @@ type service interface {
 	Get(ctx context.Context, id uuid.UUID) (Notification, error)
 	CreateBatch(ctx context.Context, drafts []Draft, idempotencyKey string) (Batch, bool, error)
 	GetBatch(ctx context.Context, id uuid.UUID) (Batch, error)
+	List(ctx context.Context, f ListFilter, after *Cursor, limit int) (Page, error)
+	Cancel(ctx context.Context, id uuid.UUID) (Notification, error)
+	Retry(ctx context.Context, id uuid.UUID) (Notification, error)
+	RetryFailed(ctx context.Context, f RetryFilter) (RetryResult, error)
 }
 
 // Handler serves the notification and batch endpoints. It reads requests and writes answers; the rules are in
@@ -44,7 +48,11 @@ func NewHandler(svc service, log *slog.Logger, maxBatchBody int64) *Handler {
 // RegisterRoutes mounts the module's endpoints on mux (ADR 0008).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /v1/notifications", httpx.Handle(h.log, h.create))
+	mux.Handle("GET /v1/notifications", httpx.Handle(h.log, h.list))
 	mux.Handle("GET /v1/notifications/{id}", httpx.Handle(h.log, h.get))
+	mux.Handle("POST /v1/notifications/{id}/cancel", httpx.Handle(h.log, h.cancel))
+	mux.Handle("POST /v1/notifications/{id}/retry", httpx.Handle(h.log, h.retry))
+	mux.Handle("POST /v1/notifications/retry", httpx.Handle(h.log, h.retryFailed))
 	mux.Handle("POST /v1/batches", httpx.Handle(h.log, h.createBatch))
 	mux.Handle("GET /v1/batches/{id}", httpx.Handle(h.log, h.getBatch))
 }
@@ -79,15 +87,17 @@ func idempotencyKey(r *http.Request) (string, error) {
 
 // notificationResponse is a notification as the API shows it.
 type notificationResponse struct {
-	ID            uuid.UUID `json:"id"`
-	To            string    `json:"to"`
-	Channel       Channel   `json:"channel"`
-	Content       string    `json:"content"`
-	Priority      Priority  `json:"priority"`
-	Status        Status    `json:"status"`
-	CorrelationID string    `json:"correlationId"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            uuid.UUID  `json:"id"`
+	To            string     `json:"to"`
+	Channel       Channel    `json:"channel"`
+	Content       string     `json:"content"`
+	Priority      Priority   `json:"priority"`
+	Status        Status     `json:"status"`
+	CorrelationID string     `json:"correlationId"`
+	BatchID       *uuid.UUID `json:"batchId,omitzero"`
+	FailedAt      *time.Time `json:"failedAt,omitzero"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // toResponse converts n field by field; struct tags do not take part in a conversion. A field added to
@@ -155,6 +165,10 @@ func toProblem(err error) error {
 			"this Idempotency-Key was used for a different request")
 	case errors.Is(err, ErrNotFound):
 		return httpx.NewProblem(http.StatusNotFound, "not_found", "nothing has this ID")
+	case errors.Is(err, ErrNotCancellable):
+		return httpx.NewProblem(http.StatusConflict, "not_cancellable", err.Error())
+	case errors.Is(err, ErrNotRetryable):
+		return httpx.NewProblem(http.StatusConflict, "not_retryable", err.Error())
 	}
 	return err
 }

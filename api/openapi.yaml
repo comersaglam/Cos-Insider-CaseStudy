@@ -79,6 +79,59 @@ paths:
         '500':
           $ref: '#/components/responses/Problem'
 
+    get:
+      operationId: listNotifications
+      summary: List notifications, newest first, a page at a time
+      description: |
+        Filters combine with AND; `status` and `channel` may be given several times and then match any of their
+        values. Pages are ordered newest first and follow each other by cursor: pass `nextCursor` from a page as
+        `cursor` to get the next, with the same filters. A cursor is opaque. An unknown parameter is refused, so a
+        misspelt filter does not list everything.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: array, items: { $ref: '#/components/schemas/Status' } }
+          style: form
+          explode: true
+        - name: channel
+          in: query
+          schema: { type: array, items: { $ref: '#/components/schemas/Channel' } }
+          style: form
+          explode: true
+        - name: batchId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: createdFrom
+          in: query
+          description: Created at or after this time (RFC 3339, with its offset).
+          schema: { type: string, format: date-time }
+        - name: createdTo
+          in: query
+          description: Created before this time.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: A page of notifications.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '400':
+          description: A parameter is unknown or malformed (`invalid_query`, with `errors` naming each `parameter`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
   /v1/notifications/{id}:
     get:
       operationId: getNotification
@@ -98,6 +151,99 @@ paths:
                 $ref: '#/components/schemas/Notification'
         '404':
           description: No notification has this ID, or the ID is not a UUID (`not_found`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+  /v1/notifications/{id}/cancel:
+    post:
+      operationId: cancelNotification
+      summary: Cancel a notification that is still waiting
+      description: |
+        A `scheduled`, `queued` or `retrying` notification is cancelled; a worker that has already claimed it wins,
+        and the cancel is refused. Cancelling a cancelled notification answers it again, so the request is safe to
+        repeat.
+      parameters:
+        - $ref: '#/components/parameters/NotificationID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The notification, cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          description: No notification has this ID (`not_found`).
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: The notification is being sent or is finished (`not_cancellable`; `detail` names its status).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+  /v1/notifications/{id}/retry:
+    post:
+      operationId: retryNotification
+      summary: Send a failed notification again
+      description: The notification goes back to `queued` with a fresh set of attempts.
+      parameters:
+        - $ref: '#/components/parameters/NotificationID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '202':
+          description: The notification, queued again.
+          headers:
+            Location:
+              description: The notification's URL.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          description: No notification has this ID (`not_found`).
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: The notification is not failed (`not_retryable`; `detail` names its status).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+  /v1/notifications/retry:
+    post:
+      operationId: retryFailedNotifications
+      summary: Send failed notifications again in bulk
+      description: |
+        Puts the failed notifications that failed inside the window, optionally of one channel or batch, back in
+        the queue, oldest failure first, at most 10,000 per request; repeat the request for the rest while
+        `matched` exceeds `requeued`. A dry run only counts.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetryRequest'
+            example: { channel: sms, failedFrom: '2026-11-23T10:00:00Z', failedTo: '2026-11-23T11:00:00Z', dryRun: true }
+      responses:
+        '200':
+          description: A dry run; nothing changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryResult'
+        '202':
+          description: The notifications requeued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: The window is missing or empty, or the channel unknown (`validation_failed`).
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
@@ -294,8 +440,40 @@ components:
         priority: { $ref: '#/components/schemas/Priority' }
         status: { $ref: '#/components/schemas/Status' }
         correlationId: { type: string }
+        batchId: { type: string, format: uuid, description: 'The batch it came in, when it came in one.' }
+        failedAt: { type: string, format: date-time, description: 'When it failed, while it is failed (UTC).' }
         createdAt: { type: string, format: date-time, description: 'UTC' }
         updatedAt: { type: string, format: date-time, description: 'UTC' }
+
+    NotificationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Notification' }
+        nextCursor:
+          type: string
+          description: Absent on the last page; pass it as `cursor` for the next one.
+
+    RetryRequest:
+      type: object
+      additionalProperties: false
+      required: [failedFrom, failedTo]
+      properties:
+        channel: { $ref: '#/components/schemas/Channel' }
+        batchId: { type: string, format: uuid }
+        failedFrom: { type: string, format: date-time, description: 'Failed at or after this time.' }
+        failedTo: { type: string, format: date-time, description: 'Failed before this time.' }
+        dryRun: { type: boolean, default: false }
+
+    RetryResult:
+      type: object
+      required: [matched, requeued, dryRun]
+      properties:
+        matched: { type: integer, description: 'Failed notifications the filter selects.' }
+        requeued: { type: integer, description: 'Put back in the queue by this request; 0 on a dry run.' }
+        dryRun: { type: boolean }
 
     CreateBatchRequest:
       type: object
@@ -365,8 +543,10 @@ components:
 
     FieldProblem:
       type: object
-      required: [pointer, code, detail]
+      description: A body member, located by `pointer`, or a query parameter, named by `parameter`.
+      required: [code, detail]
       properties:
         pointer: { type: string, description: 'A JSON Pointer to the member, such as /to.', example: /to }
+        parameter: { type: string, description: 'The query parameter, such as status.', example: status }
         code: { type: string, enum: [required, invalid, too_long] }
         detail: { type: string }

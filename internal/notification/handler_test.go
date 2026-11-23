@@ -23,6 +23,41 @@ type fakeService struct {
 
 	batchDrafts [][]Draft
 	batch       Batch
+
+	filters     []ListFilter
+	cursors     []*Cursor
+	limits      []int
+	page        Page
+	retryFilter []RetryFilter
+	retried     RetryResult
+}
+
+func (f *fakeService) List(_ context.Context, filter ListFilter, after *Cursor, limit int) (Page, error) {
+	f.filters, f.cursors, f.limits = append(f.filters, filter), append(f.cursors, after), append(f.limits, limit)
+	return f.page, f.err
+}
+
+func (f *fakeService) Cancel(_ context.Context, id uuid.UUID) (Notification, error) {
+	if f.err != nil {
+		return Notification{}, f.err
+	}
+	n := f.result
+	n.ID, n.Status = id, StatusCancelled
+	return n, nil
+}
+
+func (f *fakeService) Retry(_ context.Context, id uuid.UUID) (Notification, error) {
+	if f.err != nil {
+		return Notification{}, f.err
+	}
+	n := f.result
+	n.ID, n.Status = id, StatusQueued
+	return n, nil
+}
+
+func (f *fakeService) RetryFailed(_ context.Context, filter RetryFilter) (RetryResult, error) {
+	f.retryFilter = append(f.retryFilter, filter)
+	return f.retried, f.err
 }
 
 func (f *fakeService) CreateBatch(_ context.Context, drafts []Draft, key string) (Batch, bool, error) {

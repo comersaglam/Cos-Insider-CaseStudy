@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
@@ -93,7 +94,18 @@ func fromRow(r db.Notification) Notification {
 		Priority:      Priority(r.Priority),
 		Status:        Status(r.Status),
 		CorrelationID: r.CorrelationID,
+		BatchID:       r.BatchID,
+		FailedAt:      utc(r.FailedAt),
 		CreatedAt:     r.CreatedAt.UTC(),
 		UpdatedAt:     r.UpdatedAt.UTC(),
 	}
+}
+
+// utc returns t in UTC, or nil.
+func utc(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
