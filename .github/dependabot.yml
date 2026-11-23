@@ -1,0 +1,31 @@
+# Weekly update proposals (docs/adr/0030), grouped so each ecosystem opens one pull request at a time. The images in
+# compose.yaml are left out: internal/platform/testenv names the same tags and a test keeps the two equal, so they
+# are moved together by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ['*']
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build

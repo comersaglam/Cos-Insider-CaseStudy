@@ -52,7 +52,7 @@ The expected answer is `202 Accepted` with `{"messageId": "<uuid>", "status": "a
 | Templates with variable substitution | 32 |
 | Real-time status updates over WebSocket | 33 |
 | Distributed tracing | 34 |
-| GitHub Actions CI/CD: automated tests and linting | 30 |
+| GitHub Actions CI/CD: automated tests and linting | 30, [0030](adr/0030-continuous-integration-and-delivery.md) |
 
 ## Deliverables
 

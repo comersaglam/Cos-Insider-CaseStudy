@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help fmt lint test build check generate up deps down smoke migrate api
+.PHONY: help fmt lint verify test build check generate up deps down smoke migrate api
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -10,6 +10,15 @@ fmt: ## Format the code (gofmt, goimports)
 
 lint: ## Run the linters, including the architecture rules (depguard)
 	golangci-lint run ./...
+
+# CI has no sqlc installed and runs it through go run at the same version: SQLC="go run ...sqlc@v1.31.1".
+SQLC ?= sqlc
+GOVULNCHECK_VERSION := v1.10.0
+
+verify: ## Check that modules are tidy, the query code is generated, and no known vulnerability reaches the code
+	go mod tidy -diff
+	$(SQLC) diff
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 # A hung test fails after TEST_TIMEOUT instead of Go's default of ten minutes.
 PKG ?= ./...
@@ -21,7 +30,7 @@ test: ## Run the tests with the race detector; one package with PKG=./internal/n
 build: ## Build both binaries into bin/
 	go build -o bin/ ./cmd/...
 
-check: lint test ## Everything CI runs
+check: verify lint test ## Everything CI runs
 
 generate: ## Regenerate the typed query code from the SQL (sqlc)
 	sqlc generate

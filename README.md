@@ -1,5 +1,7 @@
 # Event-driven notification system
 
+[![CI](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml/badge.svg)](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml)
+
 A Go service that accepts notifications through an HTTP API and delivers them over SMS, e-mail and push through an
 external provider: queue workers, a per-channel rate limit, priorities, retries with backoff, a circuit breaker,
 idempotency, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
@@ -33,8 +35,12 @@ Then open the API's documentation at <http://localhost:8080/docs>. `make down` s
 make test                                  # the whole suite, with the race detector
 make test PKG=./internal/notification/...  # one package
 make lint                                  # golangci-lint, including the architecture rules
-make check                                 # everything CI runs: lint, then test
+make check                                 # everything CI runs: verify, lint, then test
 ```
+
+CI runs the same on every push and pull request ([.github/workflows/ci.yml](.github/workflows/ci.yml)): the linters,
+the whole suite with the race detector, and the image build. Pushing a `v*` tag also publishes the image to
+`ghcr.io` ([ADR 0030](docs/adr/0030-continuous-integration-and-delivery.md)).
 
 The tests need Docker, not the running stack: those that use PostgreSQL or RabbitMQ start their own containers
 through testcontainers, each test on a database or virtual host of its own. No test reaches an external service;
@@ -60,7 +66,8 @@ the provider is an `httptest.Server`. The suite holds:
 | `make api` | run the API from source against the local stack (`make deps` first) |
 | `make test` | run the tests with the race detector; `PKG=` picks one package |
 | `make lint` | run the linters |
-| `make check` | lint and test, as CI does |
+| `make verify` | check that modules are tidy, the query code is generated, and no known vulnerability reaches the code |
+| `make check` | verify, lint and test, as CI does |
 | `make fmt` | format the code |
 | `make build` | build both binaries into `bin/` |
 | `make generate` | regenerate the typed query code from the SQL (sqlc) |

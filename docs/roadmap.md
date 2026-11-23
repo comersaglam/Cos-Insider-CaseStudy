@@ -207,6 +207,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ### 30. CI (GitHub Actions)
 - Lint, `test -race`, `govulncheck`, a check that generated `sqlc` code is current, Docker build.
+- **Decided** ([ADR 0030](adr/0030-continuous-integration-and-delivery.md)): the image is published to `ghcr.io` on a
+  `v*` tag only; every action pinned to a commit SHA, with Dependabot proposing updates weekly.
 
 ## Phase 5: bonus features
 

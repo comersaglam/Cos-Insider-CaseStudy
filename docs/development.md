@@ -4,8 +4,16 @@ How to work on this service day to day. Decisions behind the tools are in [docs/
 
 ## Tools
 
-Go (version pinned in `go.mod`), Docker, `golangci-lint`, `sqlc`, `govulncheck`, and VS Code with the official Go
-extension (`gopls`, format on save).
+Go (version pinned in `go.mod`), Docker, `golangci-lint` 2.15.0 (the version CI runs), `sqlc`, `govulncheck`, and
+VS Code with the official Go extension (`gopls`, format on save).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` lints, tests and builds the image on every push to `main` and every pull request, and
+publishes the image to `ghcr.io` when a `v*` tag is pushed
+([ADR 0030](adr/0030-continuous-integration-and-delivery.md)). `make check` runs locally what CI checks. Actions are
+pinned to commit SHAs; to move one, take the SHA of its release tag (`gh api repos/<owner>/<action>/git/ref/tags/<tag>`,
+dereferencing an annotated tag) and keep the version comment beside it, or merge Dependabot's pull request.
 
 ## Inner loop
 
@@ -28,7 +36,8 @@ extension (`gopls`, format on save).
 | `make test` | the tests, with `-race` and a 3-minute timeout; `PKG=./internal/<package>/...` runs one package. Tests that need PostgreSQL start their own through testcontainers |
 | `make generate` | regenerates the typed query code from the SQL with `sqlc` |
 | `make build` | both binaries into `bin/` |
-| `make check` | `lint` and `test`, what CI runs |
+| `make verify` | modules tidy (`go mod tidy -diff`), query code current (`sqlc diff`), no known vulnerability reaching the code (`govulncheck`, run at a pinned version) |
+| `make check` | `verify`, `lint` and `test`, what CI runs |
 | `make up` | builds the image, starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`, the worker) and waits until it is healthy |
 | `make deps` | starts only PostgreSQL and RabbitMQ, for running the API from source |
 | `make down` | stops the local stack and keeps its data |
