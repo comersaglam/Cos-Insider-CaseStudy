@@ -39,3 +39,13 @@ func TestPriorityValid(t *testing.T) {
 		}
 	}
 }
+
+func TestPriorityRank(t *testing.T) {
+	if PriorityHigh.Rank() <= PriorityNormal.Rank() || PriorityNormal.Rank() <= PriorityLow.Rank() || PriorityLow.Rank() == 0 {
+		t.Errorf("ranks = %d %d %d, want high > normal > low > 0",
+			PriorityHigh.Rank(), PriorityNormal.Rank(), PriorityLow.Rank())
+	}
+	if PriorityHigh.Rank() != MaxPriorityRank {
+		t.Errorf("high ranks %d, want MaxPriorityRank %d", PriorityHigh.Rank(), MaxPriorityRank)
+	}
+}

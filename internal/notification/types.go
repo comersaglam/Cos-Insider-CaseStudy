@@ -30,6 +30,20 @@ const (
 	PriorityLow    Priority = "low"
 )
 
+// MaxPriorityRank is the rank of the highest priority, and so the number of priority levels a queue needs.
+const MaxPriorityRank = 3
+
+// Rank orders priorities as numbers, higher first: the AMQP priority a message is published with.
+func (p Priority) Rank() uint8 {
+	switch p {
+	case PriorityHigh:
+		return MaxPriorityRank
+	case PriorityNormal:
+		return 2
+	}
+	return 1
+}
+
 // Valid reports whether p is one of the known priorities.
 func (p Priority) Valid() bool {
 	switch p {

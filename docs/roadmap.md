@@ -104,15 +104,16 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   amqp091-go v1.17 and the testcontainers RabbitMQ module.
 
 ### 20. Dispatch: outbox relay and scheduler
-- **Scope**: the relay takes unpublished outbox rows with `SKIP LOCKED`, publishes and marks them after the confirm,
-  woken by `LISTEN/NOTIFY` with a ticker as fallback; the scheduler moves due `scheduled` and `retrying` rows to the
-  outbox, and its reaper moves `sending` rows with an expired lease to `retrying` or `failed`.
-- **Tests**: two relays in parallel publish each row once; with RabbitMQ down a row waits and goes out later; the
-  scheduler leaves rows that are not yet due; the reaper takes only expired leases and records the attempt as
-  `unknown`.
-- **Watch**: batch size; publication in priority order; the relay is at least once (a crash after the confirm
-  republishes, which consumer idempotency absorbs).
-- **Migration**: `notifications.next_attempt_at` and the partial indexes of the due and unpublished queries.
+- **Scope**: the relay takes outbox rows with `SKIP LOCKED`, publishes them and deletes them after the confirm,
+  woken by `LISTEN/NOTIFY` with a slow poll as fallback; the scheduler moves due `scheduled` and `retrying` rows to
+  the outbox.
+- **Tests**: two relays in parallel publish each row once; with RabbitMQ down the relay stops and the row waits,
+  then goes out; the relay is woken by the trigger; the scheduler leaves rows that are not yet due.
+- **Migration**: `notifications.next_attempt_at` with its partial index; the outbox's `NOTIFY` trigger; the
+  outbox loses `published_at`.
+- **Decided** ([ADR 0021](adr/0021-outbox-relay-and-scheduler.md)): the notification module owns the SQL, dispatch
+  the loops; published rows are deleted; failures stop the loop (crash-only). The reaper moved to block 22, beside
+  the lease it serves.
 
 ### 21. Delivery: provider client
 - **Scope**: the webhook.site client (`to`, `channel`, `content`), timeout, `Idempotency-Key` and correlation
@@ -130,6 +131,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   message in flight at once send once; an expired lease is claimed again and counted as a possible duplicate;
   a message that panics ends in `failed` after its attempts; backoff bounds; the deadlock guard (a full semaphore
   with pending results); `-race`.
+- **Reaper** (moved here from block 20): the scheduler also returns `sending` rows with an expired lease to
+  `retrying` or `failed`, recording the attempt as `unknown` ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
 - **Migration**: `attempts`, `claimed_until`, `failure_reason`, the provider's message ID, and `delivery_attempts`.
   Single and bulk retry then reset `attempts` as they requeue.
 

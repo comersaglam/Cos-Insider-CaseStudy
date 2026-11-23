@@ -1,7 +1,7 @@
 # 19. Platform: RabbitMQ
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `f1fb6b4`
 - Decisions: [ADR 0020](../adr/0020-rabbitmq-platform.md)
 
 ## Goal

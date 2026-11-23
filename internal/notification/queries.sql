@@ -63,7 +63,7 @@ LIMIT sqlc.arg(page_size)::integer;
 
 -- name: CancelNotification :one
 -- Cancels a notification that is still in one of the given statuses; returns no row otherwise.
-UPDATE notifications SET status = 'cancelled', updated_at = now()
+UPDATE notifications SET status = 'cancelled', next_attempt_at = NULL, updated_at = now()
 WHERE id = @id AND status = ANY (@cancellable::text[])
 RETURNING *;
 
@@ -98,3 +98,32 @@ WITH picked AS (
     RETURNING n.id
 )
 INSERT INTO outbox (notification_id) SELECT id FROM requeued;
+
+-- name: ClaimOutbox :many
+-- Takes up to batch_size outbox rows, oldest first, with what publishing them needs, and locks them until the
+-- transaction ends; SKIP LOCKED leaves rows another relay holds.
+SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id
+FROM outbox o
+JOIN notifications n ON n.id = o.notification_id
+ORDER BY o.id
+LIMIT sqlc.arg(batch_size)::integer
+FOR UPDATE OF o SKIP LOCKED;
+
+-- name: DeleteOutbox :exec
+DELETE FROM outbox WHERE id = ANY (@ids::bigint[]);
+
+-- name: QueueDueNotifications :execrows
+-- Queues up to batch_size waiting notifications whose time has come, soonest first, with their outbox rows, in one
+-- statement. SKIP LOCKED keeps two schedulers from queueing one notification twice.
+WITH due AS (
+    SELECT d.id FROM notifications d
+    WHERE d.status IN ('scheduled', 'retrying') AND d.next_attempt_at <= now()
+    ORDER BY d.next_attempt_at
+    LIMIT sqlc.arg(batch_size)::integer
+    FOR UPDATE SKIP LOCKED
+), queued AS (
+    UPDATE notifications n SET status = 'queued', next_attempt_at = NULL, updated_at = now()
+    FROM due WHERE n.id = due.id
+    RETURNING n.id
+)
+INSERT INTO outbox (notification_id) SELECT id FROM queued;

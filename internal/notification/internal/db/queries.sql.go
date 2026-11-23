@@ -13,9 +13,9 @@ import (
 )
 
 const cancelNotification = `-- name: CancelNotification :one
-UPDATE notifications SET status = 'cancelled', updated_at = now()
+UPDATE notifications SET status = 'cancelled', next_attempt_at = NULL, updated_at = now()
 WHERE id = $1 AND status = ANY ($2::text[])
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at
 `
 
 type CancelNotificationParams struct {
@@ -42,8 +42,54 @@ func (q *Queries) CancelNotification(ctx context.Context, arg CancelNotification
 		&i.BatchID,
 		&i.BatchIndex,
 		&i.FailedAt,
+		&i.NextAttemptAt,
 	)
 	return i, err
+}
+
+const claimOutbox = `-- name: ClaimOutbox :many
+SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id
+FROM outbox o
+JOIN notifications n ON n.id = o.notification_id
+ORDER BY o.id
+LIMIT $1::integer
+FOR UPDATE OF o SKIP LOCKED
+`
+
+type ClaimOutboxRow struct {
+	ID             int64
+	NotificationID uuid.UUID
+	Channel        string
+	Priority       string
+	CorrelationID  string
+}
+
+// Takes up to batch_size outbox rows, oldest first, with what publishing them needs, and locks them until the
+// transaction ends; SKIP LOCKED leaves rows another relay holds.
+func (q *Queries) ClaimOutbox(ctx context.Context, batchSize int) ([]ClaimOutboxRow, error) {
+	rows, err := q.db.Query(ctx, claimOutbox, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimOutboxRow
+	for rows.Next() {
+		var i ClaimOutboxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.NotificationID,
+			&i.Channel,
+			&i.Priority,
+			&i.CorrelationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 type CopyBatchNotificationsParams struct {
@@ -114,6 +160,15 @@ func (q *Queries) CountFailedNotifications(ctx context.Context, arg CountFailedN
 	return column_1, err
 }
 
+const deleteOutbox = `-- name: DeleteOutbox :exec
+DELETE FROM outbox WHERE id = ANY ($1::bigint[])
+`
+
+func (q *Queries) DeleteOutbox(ctx context.Context, ids []int64) error {
+	_, err := q.db.Exec(ctx, deleteOutbox, ids)
+	return err
+}
+
 const getBatch = `-- name: GetBatch :one
 SELECT id, total, accepted, rejections, idempotency_key, request_hash, correlation_id, created_at FROM batches WHERE id = $1
 `
@@ -155,7 +210,7 @@ func (q *Queries) GetBatchByIdempotencyKey(ctx context.Context, idempotencyKey *
 }
 
 const getNotification = `-- name: GetNotification :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at FROM notifications WHERE id = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at FROM notifications WHERE id = $1
 `
 
 func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
@@ -176,12 +231,13 @@ func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notificati
 		&i.BatchID,
 		&i.BatchIndex,
 		&i.FailedAt,
+		&i.NextAttemptAt,
 	)
 	return i, err
 }
 
 const getNotificationByIdempotencyKey = `-- name: GetNotificationByIdempotencyKey :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at FROM notifications WHERE idempotency_key = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at FROM notifications WHERE idempotency_key = $1
 `
 
 func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempotencyKey *string) (Notification, error) {
@@ -202,6 +258,7 @@ func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempoten
 		&i.BatchID,
 		&i.BatchIndex,
 		&i.FailedAt,
+		&i.NextAttemptAt,
 	)
 	return i, err
 }
@@ -256,7 +313,7 @@ INSERT INTO notifications (
     $7, $8, $9
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at
 `
 
 type InsertNotificationParams struct {
@@ -300,6 +357,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.BatchID,
 		&i.BatchIndex,
 		&i.FailedAt,
+		&i.NextAttemptAt,
 	)
 	return i, err
 }
@@ -343,7 +401,7 @@ func (q *Queries) ListBatchItems(ctx context.Context, batchID *uuid.UUID) ([]Lis
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at FROM notifications
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at FROM notifications
 WHERE ($1::text[] IS NULL OR status = ANY ($1::text[]))
   AND ($2::text[] IS NULL OR channel = ANY ($2::text[]))
   AND ($3::uuid IS NULL OR batch_id = $3::uuid)
@@ -401,6 +459,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.BatchID,
 			&i.BatchIndex,
 			&i.FailedAt,
+			&i.NextAttemptAt,
 		); err != nil {
 			return nil, err
 		}
@@ -412,10 +471,35 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 	return items, nil
 }
 
+const queueDueNotifications = `-- name: QueueDueNotifications :execrows
+WITH due AS (
+    SELECT d.id FROM notifications d
+    WHERE d.status IN ('scheduled', 'retrying') AND d.next_attempt_at <= now()
+    ORDER BY d.next_attempt_at
+    LIMIT $1::integer
+    FOR UPDATE SKIP LOCKED
+), queued AS (
+    UPDATE notifications n SET status = 'queued', next_attempt_at = NULL, updated_at = now()
+    FROM due WHERE n.id = due.id
+    RETURNING n.id
+)
+INSERT INTO outbox (notification_id) SELECT id FROM queued
+`
+
+// Queues up to batch_size waiting notifications whose time has come, soonest first, with their outbox rows, in one
+// statement. SKIP LOCKED keeps two schedulers from queueing one notification twice.
+func (q *Queries) QueueDueNotifications(ctx context.Context, batchSize int) (int64, error) {
+	result, err := q.db.Exec(ctx, queueDueNotifications, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const requeueFailedNotification = `-- name: RequeueFailedNotification :one
 UPDATE notifications SET status = 'queued', failed_at = NULL, updated_at = now()
 WHERE id = $1 AND status = 'failed'
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at
 `
 
 // Puts a failed notification back in the queue; returns no row when it is not failed.
@@ -437,6 +521,7 @@ func (q *Queries) RequeueFailedNotification(ctx context.Context, id uuid.UUID) (
 		&i.BatchID,
 		&i.BatchIndex,
 		&i.FailedAt,
+		&i.NextAttemptAt,
 	)
 	return i, err
 }

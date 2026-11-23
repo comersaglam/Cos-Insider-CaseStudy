@@ -36,11 +36,11 @@ type Notification struct {
 	BatchID        *uuid.UUID
 	BatchIndex     *int
 	FailedAt       *time.Time
+	NextAttemptAt  *time.Time
 }
 
 type Outbox struct {
 	ID             int64
 	NotificationID uuid.UUID
 	CreatedAt      time.Time
-	PublishedAt    *time.Time
 }

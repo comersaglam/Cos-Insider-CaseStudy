@@ -31,7 +31,8 @@ finds the commit that finished block NN.
 | [16](16-batches.md) | Batch create and batch status | 2026-11-23 | Up to 1000 per request, valid items accepted and invalid ones reported, rejections kept without content | `78e1dcb` |
 | [17](17-list-cancel-and-retry.md) | List, cancel and retry | 2026-11-23 | Keyset-paged list with filters, safe cancel, single and bulk retry | `44b22f8` |
 | [18](18-one-command-stack.md) | One-command stack | 2026-11-23 | A 23.5 MB distroless image; `docker compose up` migrates and serves the API | `b569c52` |
-| [19](19-rabbitmq-platform.md) | Platform: RabbitMQ | 2026-11-23 | Topology, confirmed mandatory publishing and consuming, tested against RabbitMQ 4.4.1 | this block's commit |
+| [19](19-rabbitmq-platform.md) | Platform: RabbitMQ | 2026-11-23 | Topology, confirmed mandatory publishing and consuming, tested against RabbitMQ 4.4.1 | `f1fb6b4` |
+| [20](20-outbox-relay-and-scheduler.md) | Dispatch: outbox relay and scheduler | 2026-11-23 | Outbox rows reach RabbitMQ at commit, woken by NOTIFY; due work is queued | this block's commit |
 
 ## Template
 
