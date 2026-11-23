@@ -19,8 +19,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: table-driven: every allowed and refused transition, each channel's boundaries (limit, limit + 1),
   recipient formats.
 - **Watch**: enums are string constants, readable in JSON and SQL; unknown values are refused when parsed.
-- **Open question**: the SMS limit (one 160-character segment or multi-part up to 1600), an e-mail subject, the
-  push recipient format, E.164 phone numbers.
+- **Decided** ([ADR 0011](adr/0011-notification-domain.md)): the provider contract is fixed, so there is no e-mail
+  subject; SMS content up to 1600 characters, counted in characters; recipients checked by shape with the
+  standard library (E.164, one bare e-mail address, an opaque push token), never normalised.
 
 ### 11. Platform: config, observability, httpx
 - **Scope**: `Config` from the environment; `slog` JSON logger; correlation ID taken from the request or generated,

@@ -18,6 +18,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0008](0008-modular-monolith-layout.md) | Modular monolith: packages by feature, a platform layer and one central router | Accepted |
 | [0009](0009-concurrency-model.md) | Concurrency model | Accepted |
 | [0010](0010-local-environment-with-docker-compose.md) | Local environment with Docker Compose | Accepted |
+| [0011](0011-notification-domain.md) | Notification domain: the provider contract, statuses and validation | Accepted |
 
 ## Template
 

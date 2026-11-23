@@ -1,7 +1,7 @@
 # 09. Local environment
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `e2e5740`
 - Decisions: [ADR 0010](../adr/0010-local-environment-with-docker-compose.md)
 
 ## Goal
