@@ -16,6 +16,9 @@ What the code and its tests already say is not repeated here.
   not broken, and remove only what your own change orphaned.
 - **Built-ins first, industry standard where a choice is open**: the Go standard library before a dependency,
   a well-known dependency before code of our own.
+- **Every block is logged** in `docs/progression/NN-name.md` (goal, steps, verification, follow-ups, links to its
+  commits and ADRs) and in the index there, in the commit that finishes the block. A block with no file change
+  is logged in the next commit.
 - **Every significant decision is an ADR** in `docs/adr/`, with what was chosen, what was deliberately left out,
   and why. Day-to-day workflow is in `docs/development.md`.
 
