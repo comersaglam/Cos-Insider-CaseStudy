@@ -53,7 +53,7 @@ func TestRouter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			log := observability.NewLogger(&logs, slog.LevelInfo)
-			h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+			h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
 
 			r := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
 			r.Header.Set(observability.CorrelationHeader, "trace-me")
@@ -81,7 +81,7 @@ func TestRouter(t *testing.T) {
 
 func TestRouterServesMetrics(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/unknown", nil))
 
 	rec := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestRouterServesProbes(t *testing.T) {
 		{"failed readiness", down, "/readyz", http.StatusServiceUnavailable, true},
 	} {
 		logs.Reset()
-		h := NewRouter(log, observability.NewRegistry(), tt.probes, notification.NewHandler(noNotifications{}, log, 1<<20))
+		h := NewRouter(log, observability.NewRegistry(), tt.probes, notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
 		rec := httptest.NewRecorder()
 		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil)
 		h.ServeHTTP(rec, r)
@@ -126,7 +126,7 @@ func TestRouterServesProbes(t *testing.T) {
 // loads a pinned Swagger UI whose files the browser checks against their hashes.
 func TestRouterServesTheContractAndItsDocumentation(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/openapi.yaml", nil))
@@ -157,7 +157,7 @@ func TestRouterServesTheContractAndItsDocumentation(t *testing.T) {
 // the same set, so neither has one the other lacks.
 func TestEveryRouteIsInTheContract(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	_, routes := newRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+	_, routes := newRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
 	ops, err := contract.Operations()
 	if err != nil {
 		t.Fatal(err)

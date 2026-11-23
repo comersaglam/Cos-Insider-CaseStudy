@@ -3,6 +3,7 @@ module github.com/comersaglam/Cos-Insider-CaseStudy
 go 1.27.4
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/jackc/pgx/v5 v5.13.0

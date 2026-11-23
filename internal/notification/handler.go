@@ -41,14 +41,15 @@ type service interface {
 // Service.
 type Handler struct {
 	svc          service
+	hub          *Hub
 	log          *slog.Logger
 	maxBatchBody int64
 }
 
-// NewHandler returns the handlers over svc. log receives the errors they cannot answer in detail; maxBatchBody
-// bounds the body of a batch request, in bytes.
-func NewHandler(svc service, log *slog.Logger, maxBatchBody int64) *Handler {
-	return &Handler{svc: svc, log: log, maxBatchBody: maxBatchBody}
+// NewHandler returns the handlers over svc. hub passes status changes to WebSocket subscribers; log receives the
+// errors the handlers cannot answer in detail; maxBatchBody bounds the body of a batch request, in bytes.
+func NewHandler(svc service, hub *Hub, log *slog.Logger, maxBatchBody int64) *Handler {
+	return &Handler{svc: svc, hub: hub, log: log, maxBatchBody: maxBatchBody}
 }
 
 // RegisterRoutes mounts the module's endpoints on mux (ADR 0008).
@@ -67,6 +68,7 @@ func (h *Handler) RegisterRoutes(mux httpx.Mux) {
 	mux.Handle("GET /v1/templates/{id}", httpx.Handle(h.log, h.getTemplate))
 	mux.Handle("PUT /v1/templates/{id}", httpx.Handle(h.log, h.updateTemplate))
 	mux.Handle("DELETE /v1/templates/{id}", httpx.Handle(h.log, h.deleteTemplate))
+	mux.Handle("GET /v1/status-updates", httpx.Handle(h.log, h.statusUpdates))
 }
 
 // createRequest is the body of POST /v1/notifications. The member names are the provider contract's.

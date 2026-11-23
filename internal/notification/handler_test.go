@@ -154,7 +154,8 @@ func serve(t *testing.T, svc service, method, path, body string, header map[stri
 func serveWithLimit(t *testing.T, svc service, limit int64, method, path, body string, header map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()
-	NewHandler(svc, slog.New(slog.DiscardHandler), limit).RegisterRoutes(mux)
+	log := slog.New(slog.DiscardHandler)
+	NewHandler(svc, NewHub(log), log, limit).RegisterRoutes(mux)
 	r := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 	if body != "" {
 		r.Header.Set("Content-Type", "application/json")

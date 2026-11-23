@@ -1,7 +1,7 @@
 # 32. Templates
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: `fffbbb0`
 - Decisions: [ADR 0032](../adr/0032-templates.md)
 
 ## Goal

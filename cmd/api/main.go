@@ -103,7 +103,21 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 		return nil
 	}
 
-	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log, int64(maxBatchBody))
+	store := notification.NewStore(pool)
+	hub := notification.NewHub(log)
+	notifications := notification.NewHandler(notification.NewService(store, log), hub, log, int64(maxBatchBody))
+	// Status updates (ADR 0033): the hub hears PostgreSQL's announcements until run returns, then closes every
+	// WebSocket subscription; run waits for it, before the pool closes.
+	hubCtx, stopHub := context.WithCancel(ctx)
+	hubDone := make(chan struct{})
+	go func() {
+		defer close(hubDone)
+		hub.Run(hubCtx, func(ctx context.Context) (notification.StatusSource, error) { return store.ListenStatus(ctx) })
+	}()
+	defer func() {
+		stopHub()
+		<-hubDone
+	}()
 	probes := health.NewHandler(map[string]health.Check{"postgres": pool.Ping}, log)
 	srv := httpx.NewServer(httpapi.NewRouter(log, observability.NewRegistry(), probes, notifications), log)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)

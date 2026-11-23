@@ -216,7 +216,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 |---|---|---|
 | 31 | Scheduled notifications | The mechanism exists ([ADR 0006](adr/0006-delayed-work-waits-in-postgresql.md)); a `scheduledAt` field, its validation and cancellation. Decided in [ADR 0031](adr/0031-scheduled-notifications.md): up to 30 days ahead, a time already come sent at once. |
 | 32 | Templates | `text/template`; a templates table with CRUD; a missing variable is an error. Decided in [ADR 0032](adr/0032-templates.md): placeholders only, rendered when a notification is created, full CRUD. |
-| 33 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. |
+| 33 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. Decided in [ADR 0033](adr/0033-status-updates-over-websocket.md): `coder/websocket`, up to 100 notifications and a batch per connection, a status trigger. |
 | 34 | Distributed tracing | OpenTelemetry propagated over HTTP and AMQP headers; Jaeger in Compose. |
 | 35 | Load test and Grafana | Prometheus and Grafana in Compose with a provisioned dashboard. Load tests at several scales (hundreds to tens of thousands of notifications), the large ones repeated with several seeds of a reproducible workload (channels, priorities, failing recipients); each run watched in Grafana, screenshots saved in `docs/images` and shown in the README: the rate limit, priorities, retries and the breaker at work. |
 

@@ -22,6 +22,7 @@ info:
        provider's `Retry-After`, up to 8 attempts, then `failed` (`attempts_exhausted`).
     4. A failed notification can be sent again, one by one (`POST /v1/notifications/{id}/retry`) or in bulk
        (`POST /v1/notifications/retry`). One still waiting can be cancelled.
+    5. Every status change can be followed as it happens over a WebSocket (`GET /v1/status-updates`).
 
     Delivery is at least once: a worker that stops in the middle of a send cannot know whether the provider
     received it, so the notification is sent again; the provider can drop the repeat by its `Idempotency-Key`.
@@ -55,6 +56,7 @@ info:
     | `unknown_field` | 400 | The body has a member the request does not define. |
     | `invalid_idempotency_key` | 400 | `Idempotency-Key` is not 1 to 255 visible ASCII characters. |
     | `invalid_query` | 400 | A query parameter is unknown or malformed; `errors` names each one. |
+    | `origin_not_allowed` | 403 | A page of another origin opened a WebSocket (`/v1/status-updates` only). |
     | `not_found` | 404 | No resource has this ID, or the ID is not a UUID, or no route has this path. |
     | `method_not_allowed` | 405 | The path exists but does not accept this method. |
     | `not_cancellable` | 409 | The notification is being sent or is finished. |
@@ -62,6 +64,7 @@ info:
     | `template_name_taken` | 409 | Another template has this name. |
     | `body_too_large` | 413 | The body is larger than the operation allows. |
     | `unsupported_media_type` | 415 | The body is not sent as `application/json`. |
+    | `upgrade_required` | 426 | A plain request reached the WebSocket endpoint (`/v1/status-updates` only). |
     | `validation_failed` | 422 | The request breaks a rule; `errors` locates each one by JSON Pointer. |
     | `idempotency_key_reused` | 422 | The `Idempotency-Key` was used for a different request. |
     | `internal_error` | 500 | Something failed on the server; `correlationId` finds it in the logs. |
@@ -651,6 +654,97 @@ paths:
                   - { pointer: /channel, code: invalid, detail: 'must be one of sms, email, push' }
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /v1/status-updates:
+    get:
+      tags: [Notifications]
+      operationId: followStatusUpdates
+      summary: Follow status changes as they happen, over a WebSocket
+      description: |
+        A WebSocket (RFC 6455): the request upgrades the connection, and the server then sends a JSON text message,
+        a `StatusEvent`, each time a followed notification's status changes, whichever process changed it: the
+        API, a worker, the scheduler (ADR 0033). Follow up to 100 notifications by `notificationId`, a batch by
+        `batchId`, or both.
+
+        Changes are sent from the moment the connection opens; read the current status first with
+        `GET /v1/notifications/{id}` or `GET /v1/batches/{id}`. The client sends nothing: a message from it closes
+        the connection. The server pings every 30 seconds. It closes with 1001 (going away) when it stops, and with
+        1008 (policy violation) when the client falls 64 messages behind. A browser may connect only from a page of
+        the API's own origin.
+
+        Swagger UI cannot open a WebSocket; a client such as `websocat` can:
+        `websocat "ws://localhost:8080/v1/status-updates?batchId=<batch id>"`.
+      parameters:
+        - name: notificationId
+          in: query
+          description: A notification to follow; repeat it for up to 100.
+          schema: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+          example: [01a20a15-8f87-79a7-b325-10f29616e45e]
+        - name: batchId
+          in: query
+          description: A batch whose notifications to follow.
+          schema: { type: string, format: uuid }
+          example: 01a20a15-afcd-7655-b81f-dc19ac56238f
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '101':
+          description: |
+            Switched to WebSocket. Each message is a `StatusEvent` (see the schema), such as
+            `{"notificationId":"01a20a15-8f87-79a7-b325-10f29616e45e","status":"sent","at":"2026-11-23T20:25:15.092411Z"}`.
+        '400':
+          description: >-
+            Nothing to follow, an ID that is not a UUID, more than 100 notifications, two batches, or another
+            parameter (`invalid_query`, with `errors` naming each `parameter`).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the query is invalid
+                code: invalid_query
+                correlationId: req-7f3c9a
+                errors:
+                  - { parameter: notificationId, code: invalid, detail: 'give notificationId, batchId or both' }
+        '403':
+          description: A page of another origin asked (`origin_not_allowed`).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Forbidden
+                status: 403
+                detail: a page may follow status updates only from the API's own origin
+                code: origin_not_allowed
+                correlationId: req-7f3c9a
+        '426':
+          description: A plain request, not a WebSocket upgrade (`upgrade_required`).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Upgrade Required
+                status: 426
+                detail: this endpoint is a WebSocket; upgrade the connection
+                code: upgrade_required
+                correlationId: req-7f3c9a
 
   /v1/batches:
     post:
@@ -1599,6 +1693,17 @@ components:
         correlationId: { type: string, description: 'The correlation ID of the request that created it.' }
         createdAt: { type: string, format: date-time, description: 'When it was accepted (UTC).' }
 
+    StatusEvent:
+      type: object
+      description: A message of `/v1/status-updates`, one per committed status change.
+      required: [notificationId, status, at]
+      properties:
+        notificationId: { type: string, format: uuid }
+        batchId: { type: string, format: uuid, description: 'Present when the notification came in a batch.' }
+        status: { $ref: '#/components/schemas/Status' }
+        at: { type: string, format: date-time, description: 'When the status changed (UTC).' }
+      example: { notificationId: 01a20a15-afcd-7776-9e48-3825d70d25db, batchId: 01a20a15-afcd-7655-b81f-dc19ac56238f, status: sent, at: '2026-11-23T20:25:23.412Z' }
+
     TemplateRequest:
       type: object
       additionalProperties: false
@@ -1729,6 +1834,8 @@ components:
             - template_name_taken
             - body_too_large
             - unsupported_media_type
+            - upgrade_required
+            - origin_not_allowed
             - validation_failed
             - idempotency_key_reused
             - internal_error

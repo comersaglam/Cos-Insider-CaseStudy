@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/api/contract"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/testenv"
@@ -433,5 +435,36 @@ func TestAPITemplatesEndToEnd(t *testing.T) {
 	}
 	if _, _, kept := call(t, http.MethodGet, base+"/v1/notifications/"+n["id"].(string), "", nil); kept["templateId"] != id {
 		t.Errorf("after the template was deleted, the notification shows templateId %v", kept["templateId"])
+	}
+}
+
+// TestAPIStatusUpdatesEndToEnd: a client following a notification over WebSocket hears its cancellation, a status
+// change made through the API, announced by PostgreSQL and passed on by the hub.
+func TestAPIStatusUpdatesEndToEnd(t *testing.T) {
+	base, _ := startAPI(t)
+	_, _, n := call(t, http.MethodPost, base+"/v1/notifications", `{"to":"+905551234567","channel":"sms","content":"hi"}`, nil)
+	id, _ := n["id"].(string)
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(base, "http")+"/v1/status-updates?notificationId="+id, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	if status, _, _ := call(t, http.MethodPost, base+"/v1/notifications/"+id+"/cancel", "", nil); status != http.StatusOK {
+		t.Fatalf("cancel = %d", status)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("no status update: %v", err)
+	}
+	var update map[string]any
+	if err := json.Unmarshal(data, &update); err != nil || update["notificationId"] != id || update["status"] != "cancelled" {
+		t.Errorf("update = %s, %v", data, err)
 	}
 }
