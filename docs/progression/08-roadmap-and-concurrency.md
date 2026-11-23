@@ -1,7 +1,7 @@
 # 08. Roadmap and concurrency model
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `8e6f57e`
 - Decisions: [ADR 0009](../adr/0009-concurrency-model.md)
 
 ## Goal

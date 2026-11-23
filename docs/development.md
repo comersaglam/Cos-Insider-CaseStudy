@@ -25,8 +25,26 @@ extension (`gopls`, format on save).
 | `make test` | every test, with `-race`; tests that need PostgreSQL start their own through testcontainers |
 | `make build` | both binaries into `bin/` |
 | `make check` | `lint` and `test`, what CI runs |
+| `make up` | starts the local stack and waits until it is healthy |
+| `make down` | stops the local stack and keeps its data |
 
-Targets added with the parts they serve: `generate` (`sqlc`), `up` / `down` (Docker Compose), `migrate`.
+Targets added with the parts they serve: `generate` (`sqlc`), `migrate`.
+
+## Local stack
+
+`compose.yaml` runs PostgreSQL and RabbitMQ for running and inspecting the service by hand
+([ADR 0010](adr/0010-local-environment-with-docker-compose.md)). Tests do not need it.
+
+| Service | Address | Credentials |
+|---|---|---|
+| PostgreSQL | `postgres://localhost:5432/notifications` | `notifications` / `notifications` |
+| RabbitMQ (AMQP) | `amqp://localhost:5672` | `notifications` / `notifications` |
+| RabbitMQ management UI | <http://localhost:15672> | `notifications` / `notifications` |
+
+- `docker compose exec postgres psql -U notifications` opens a SQL shell.
+- To change a port or a password, copy `.env.example` to `.env` and edit it.
+- `docker compose down --volumes` deletes the data and starts the next `make up` from empty.
+- Image tags are the ones in `internal/platform/testenv`; change both together, or `make test` fails.
 
 ## Where code goes
 
@@ -35,9 +53,10 @@ Targets added with the parts they serve: `generate` (`sqlc`), `up` / `down` (Doc
 | `cmd/api`, `cmd/worker` | composition roots: configuration, platform clients and modules are built and connected here |
 | `internal/httpapi` | the central router: the middleware chain and the one place modules are mounted |
 | `internal/<module>` | one feature: its types, use cases, handlers, storage and tests (`notification`, `delivery`, `dispatch`, `health`) |
-| `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`) |
+| `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`, and `testenv` for integration tests) |
 | `migrations` | versioned SQL migrations |
 | `api/openapi.yaml` | the API contract |
+| `compose.yaml`, `Dockerfile` | the local stack and the application's image, at the root where Docker looks for them; `deploy/` only for configuration files mounted into containers |
 
 ## Go practices this codebase relies on
 

@@ -20,7 +20,8 @@ finds the commit that finished block NN.
 | [05](05-delivery-and-retry.md) | Delivery and retry design | 2026-11-23 | Retry policy, attempt history, circuit breaker | `67619f9` |
 | [06](06-project-layout.md) | Project layout | 2026-11-23 | Modular monolith skeleton with enforced import rules | `ad58ebb` |
 | [07](07-progression-log.md) | Progression log | 2026-11-23 | This log, backfilled for blocks 01–06 | `4c1d2fc` |
-| [08](08-roadmap-and-concurrency.md) | Roadmap and concurrency model | 2026-11-23 | Blocks 09–33 planned; goroutine structure decided | this block's commit |
+| [08](08-roadmap-and-concurrency.md) | Roadmap and concurrency model | 2026-11-23 | Blocks 09–33 planned; goroutine structure decided | `8e6f57e` |
+| [09](09-local-environment.md) | Local environment | 2026-11-23 | PostgreSQL and RabbitMQ in Compose, image tags shared with tests | this block's commit |
 
 ## Template
 

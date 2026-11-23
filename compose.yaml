@@ -1,0 +1,53 @@
+# The local stack: PostgreSQL and RabbitMQ for running and inspecting the service by hand (docs/adr/0010).
+# Tests do not use it; they start their own containers from the same images, which internal/platform/testenv
+# names and a test keeps equal to the tags below. `make up` starts it, `make down` stops it.
+
+name: notifications
+
+services:
+  postgres:
+    image: postgres:18.7-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-notifications}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notifications}
+      POSTGRES_DB: ${POSTGRES_DB:-notifications}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # From PostgreSQL 18 the image keeps its data under a versioned directory below this path.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # Over TCP, because the server the image runs while initialising listens only on a Unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:4.4.1-management-alpine
+    # RabbitMQ names its node, and the data stored under it, after the host name; a fixed one keeps the data
+    # across container re-creation.
+    hostname: rabbitmq
+    # The health check runs as the container's user. As root, its first run could create the Erlang cookie
+    # before the server does, readable by root alone, and the server, running as rabbitmq, would fail to start.
+    user: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-notifications}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-notifications}
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      # Passes only once the AMQP listener accepts connections, not merely when the node process is up.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
