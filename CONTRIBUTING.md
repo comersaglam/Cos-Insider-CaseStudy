@@ -16,6 +16,8 @@ What the code and its tests already say is not repeated here.
   not broken, and remove only what your own change orphaned.
 - **Built-ins first, industry standard where a choice is open**: the Go standard library before a dependency,
   a well-known dependency before code of our own.
+- **Every significant decision is an ADR** in `docs/adr/`, with what was chosen, what was deliberately left out,
+  and why. Day-to-day workflow is in `docs/development.md`.
 
 ## Commit messages
 
