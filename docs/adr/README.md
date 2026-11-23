@@ -10,6 +10,10 @@ Every decision follows the industry standard where one exists; a departure from 
 |---|---|---|
 | [0001](0001-go-toolchain-and-libraries.md) | Go toolchain and libraries | Accepted |
 | [0002](0002-testing-strategy.md) | Testing strategy | Accepted |
+| [0003](0003-postgresql-and-rabbitmq-with-outbox.md) | PostgreSQL as the source of truth, RabbitMQ for dispatch, joined by a transactional outbox | Accepted |
+| [0004](0004-separate-api-and-worker-binaries.md) | Separate API and worker binaries from one image | Accepted |
+| [0005](0005-rate-limit-with-single-active-consumer.md) | Enforce 100 messages per second per channel with a single active consumer | Accepted |
+| [0006](0006-delayed-work-waits-in-postgresql.md) | Delayed work waits in PostgreSQL; RabbitMQ carries only work that is due | Accepted |
 
 ## Template
 
