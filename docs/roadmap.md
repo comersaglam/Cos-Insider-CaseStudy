@@ -202,6 +202,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **An architecture diagram in D2**, drawn last, after researching how to make it look best (layout engine, theme,
   icons, rendering to SVG for GitHub).
 - Screenshots from block 35 (Grafana, load tests) embedded from `docs/images`.
+- **Done in two steps**: the README itself in block 29; the D2 diagram and the screenshots after block 35, as the
+  owner asked, with the diagram's look researched first.
 
 ### 30. CI (GitHub Actions)
 - Lint, `test -race`, `govulncheck`, a check that generated `sqlc` code is current, Docker build.

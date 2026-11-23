@@ -40,7 +40,8 @@ finds the commit that finished block NN.
 | [25](25-metrics.md) | Metrics | 2026-11-23 | Prometheus `/metrics` on both processes, queue depth on scrape, a JSON summary for people | `2fb8a8e` |
 | [26](26-health.md) | Health | 2026-11-23 | `/healthz` and `/readyz` on both processes; Compose waits until the service is ready | `d369c06` |
 | [27](27-correlation-across-the-queue.md) | Correlation across the queue | 2026-11-23 | One correlation ID follows a notification from the API to the provider and the worker's log | `30f26c2` |
-| [28](28-openapi-and-swagger-ui.md) | OpenAPI and Swagger UI | 2026-11-23 | A detailed contract, checked against every answer the tests see, rendered at `/docs` | this block's commit |
+| [28](28-openapi-and-swagger-ui.md) | OpenAPI and Swagger UI | 2026-11-23 | A detailed contract, checked against every answer the tests see, rendered at `/docs` | `9fe660f` |
+| [29](29-readme.md) | README | 2026-11-23 | Setup, run and test through make first; the API, how it works and how it meets the brief | this block's commit |
 
 ## Template
 

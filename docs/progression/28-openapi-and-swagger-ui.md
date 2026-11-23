@@ -1,7 +1,7 @@
 # 28. OpenAPI and Swagger UI
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `9fe660f`
 - Decisions: [ADR 0029](../adr/0029-contract-tests-and-documentation-page.md)
 
 ## Goal
