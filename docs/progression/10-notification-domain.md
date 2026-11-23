@@ -1,7 +1,7 @@
 # 10. Notification domain
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `2d19a8d`
 - Decisions: [ADR 0011](../adr/0011-notification-domain.md)
 
 ## Goal
@@ -33,5 +33,5 @@ statuses, which status may follow which, and the rules a client's request must m
 
 ## Follow-ups
 
-Block 11, the platform layer: configuration from the environment, the JSON logger with correlation IDs, and the
-HTTP helpers (middleware, the RFC 9457 error writer, JSON decoding).
+Block 11 settles the message flow and delivery guarantee that ADR 0003 left open; the platform layer follows as
+block 12.

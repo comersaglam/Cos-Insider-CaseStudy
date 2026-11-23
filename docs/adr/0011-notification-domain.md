@@ -65,9 +65,9 @@ guessed at.
 
 - The provider client maps a stored notification to the request without translation.
 - Turkish text is counted fairly: "ş" is one character, although it takes two bytes.
-- A crash can leave a notification in `sending`; when RabbitMQ redelivers it, the worker's claim takes it again
-  without a status change. That is a property of the claim, not a transition, and is handled where the claim is
-  written.
+- A crash can leave a notification in `sending`; once its lease expires, a redelivered message's claim takes it
+  again without a status change. That is a property of the claim, not a transition
+  ([ADR 0012](0012-message-flow-and-delivery-guarantee.md)).
 - The entity with an ID and timestamps (`Notification`) comes with its storage, where the ID's type is chosen.
 
 ### Deliberately not done
@@ -78,5 +78,5 @@ guessed at.
 | Counting SMS segments (GSM-7 or UCS-2) | Segments are what the provider bills, and the contract has no notion of them; counting them would add an encoding detector with no effect on delivery. |
 | An e-mail subject or a push title | The contract has no field for them; accepting a value that is never delivered would mislead the client. |
 | `libphonenumber` (checking a number exists in its country's plan) | A large dependency for a check the provider makes anyway; the E.164 shape catches malformed input. |
-| Normalising recipients (adding `+90`, trimming spaces) | A wrong guess at a country code sends a message to a stranger. |
+| Normalising recipients (adding `+90`, removing spaces) | The brief would allow it, since only the provider request is fixed and it would still receive E.164. But a wrong guess at a country code sends a message to a stranger, and messaging APIs (Twilio, Amazon SNS, Vonage) take E.164 at the boundary and leave formatting to the client. |
 | A state-machine library | The rules are a seven-entry map and one lookup. |

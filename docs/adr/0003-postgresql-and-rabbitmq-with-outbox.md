@@ -1,6 +1,6 @@
 # 0003. PostgreSQL as the source of truth, RabbitMQ for dispatch, joined by a transactional outbox
 
-- Status: Accepted
+- Status: Accepted; amended by [0012](0012-message-flow-and-delivery-guarantee.md) (exchange, duplicate guarantee)
 - Date: 2026-11-23
 
 ## Context
