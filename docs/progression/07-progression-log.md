@@ -1,7 +1,7 @@
 # 07. Progression log
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `4c1d2fc`
 - Decisions: none
 
 ## Goal

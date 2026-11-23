@@ -1,7 +1,7 @@
 # Progression
 
 How the project was built, block by block. A block is one piece of work that can be checked on its own
-([CONTRIBUTING.md](../CONTRIBUTING.md)); each has one file here, written in the same commit that finishes it.
+([CONTRIBUTING.md](../../CONTRIBUTING.md)); each has one file here, written in the same commit that finishes it.
 
 This log does not repeat other records: *why* a decision was taken lives in the [ADRs](../adr/README.md), *what
 changed in the code* lives in the commit messages. A block's file says what the block set out to do, the steps it
@@ -19,7 +19,8 @@ finds the commit that finished block NN.
 | [04](04-toolchain-and-remote.md) | Toolchain and remote | 2026-11-23 | Tools verified, repository pushed to GitHub | none |
 | [05](05-delivery-and-retry.md) | Delivery and retry design | 2026-11-23 | Retry policy, attempt history, circuit breaker | `67619f9` |
 | [06](06-project-layout.md) | Project layout | 2026-11-23 | Modular monolith skeleton with enforced import rules | `ad58ebb` |
-| [07](07-progression-log.md) | Progression log | 2026-11-23 | This log, backfilled for blocks 01–06 | this block's commit |
+| [07](07-progression-log.md) | Progression log | 2026-11-23 | This log, backfilled for blocks 01–06 | `4c1d2fc` |
+| [08](08-roadmap-and-concurrency.md) | Roadmap and concurrency model | 2026-11-23 | Blocks 09–33 planned; goroutine structure decided | this block's commit |
 
 ## Template
 
