@@ -46,7 +46,8 @@ finds the commit that finished block NN.
 | [31](31-scheduled-notifications.md) | Scheduled notifications | 2026-11-23 | `scheduledAt` up to 30 days ahead; the notification waits in PostgreSQL and is sent when due | `b7813f9` |
 | [32](32-templates.md) | Templates | 2026-11-24 | `/v1/templates` with `{{.name}}` placeholders only; notifications rendered from them when created | `fffbbb0` |
 | [33](33-status-updates.md) | Status updates over WebSocket | 2026-11-24 | `/v1/status-updates` follows notifications and batches, fed by a status trigger | `5389db4` |
-| [34](34-distributed-tracing.md) | Distributed tracing | 2026-11-24 | One OpenTelemetry trace per notification, from the request to its last attempt; Jaeger in Compose | this block's commit |
+| [34](34-distributed-tracing.md) | Distributed tracing | 2026-11-24 | One OpenTelemetry trace per notification, from the request to its last attempt; Jaeger in Compose | `b566214` |
+| [35](35-dashboards-and-load-tests.md) | Dashboards and load tests | 2026-11-24 | Prometheus and a provisioned Grafana dashboard; two seeded load runs, one of which found a breaker livelock | this block's commit |
 
 ## Template
 

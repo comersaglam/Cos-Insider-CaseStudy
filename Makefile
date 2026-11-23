@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help fmt lint verify test build check generate up deps down smoke migrate api
+.PHONY: help fmt lint verify test build check generate up deps down smoke load migrate api
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -46,6 +46,15 @@ down: ## Stop the local stack, keeping its data (docker compose down --volumes d
 
 smoke: ## Create and read a notification through the running API
 	scripts/smoke.sh
+
+# The load test's workload: how many, its seed, and the shares of SMS the stand-in answers 503 and 422.
+N ?= 3000
+SEED ?= 1
+UNAVAILABLE ?= 0
+REJECTED ?= 0
+
+load: ## Send a seeded burst to the running stack and measure how it drains (N, SEED, UNAVAILABLE, REJECTED)
+	go run ./scripts/loadtest -n $(N) -seed $(SEED) -unavailable $(UNAVAILABLE) -rejected $(REJECTED)
 
 # The local stack's database, as compose.yaml starts it; set DATABASE_URL to use another.
 DATABASE_URL ?= postgres://notifications:notifications@localhost:5432/notifications?sslmode=disable

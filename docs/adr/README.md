@@ -42,6 +42,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0032](0032-templates.md) | Templates | Accepted |
 | [0033](0033-status-updates-over-websocket.md) | Status updates over WebSocket | Accepted |
 | [0034](0034-distributed-tracing.md) | Distributed tracing | Accepted |
+| [0035](0035-dashboards-and-load-tests.md) | Dashboards and load tests | Accepted |
 
 ## Template
 

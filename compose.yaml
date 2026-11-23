@@ -133,6 +133,32 @@ services:
     ports:
       - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
 
+  # Metrics and dashboards (ADR 0035): Prometheus scrapes both processes, and Grafana shows them on a provisioned
+  # dashboard at http://localhost:3000, open to anonymous viewers on this machine.
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9091}:9090"
+
+  grafana:
+    image: grafana/grafana:13.2.6
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/notifications.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      prometheus:
+        condition: service_started
+
 volumes:
   postgres-data:
   rabbitmq-data:

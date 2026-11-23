@@ -23,7 +23,8 @@ dereferencing an annotated tag) and keep the version comment beside it, or merge
 2. Write the code until it passes.
 3. Before committing, run the whole suite with the race detector: `make test`.
 4. Run `make lint`; the linter's findings are fixed, not silenced. A false positive is the one exception: it is
-   silenced on its own line with the reason (`//nolint:gosec // G404: jitter, not a secret`).
+   silenced on its own line with the reason (`//nolint:gosec // G404: jitter, not a secret`), as is the load test's
+   seeded generator.
 
 ## Make targets
 
@@ -64,6 +65,7 @@ Tests do not need it.
 | Probes: API, worker (`/healthz` the same) | <http://localhost:8080/readyz>, <http://localhost:9090/readyz> | none |
 | The contract, rendered by Swagger UI, and as YAML | <http://localhost:8080/docs>, <http://localhost:8080/openapi.yaml> | none |
 | Traces (Jaeger) | <http://localhost:16686> | none |
+| Dashboards (Grafana), Prometheus | <http://localhost:3000>, <http://localhost:9091> | none to view |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.

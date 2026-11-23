@@ -27,6 +27,7 @@ Then open the API's documentation at <http://localhost:8080/docs>. `make down` s
 | <http://localhost:8080/docs> | the API's contract, rendered by Swagger UI |
 | <http://localhost:8080/v1/metrics> | the service's state as a person reads it |
 | <http://localhost:8080/metrics>, <http://localhost:9090/metrics> | Prometheus metrics of the API and the worker |
+| <http://localhost:3000> | Grafana: the service's dashboard (no login on this machine) |
 | <http://localhost:16686> | Jaeger: the trace of each request, from the API through RabbitMQ to the provider |
 | <http://localhost:15672> | RabbitMQ's management UI (`notifications` / `notifications`) |
 | <http://localhost:8081/__admin/requests> | what the stand-in provider received |
@@ -62,6 +63,7 @@ the provider is an `httptest.Server`. The suite holds:
 |---|---|
 | `make up` | build and start the whole service and wait until it is healthy |
 | `make smoke` | create and read a notification through the running API, and wait until it is sent |
+| `make load` | send a seeded burst to the running stack and measure how it drains (`N`, `SEED`, `UNAVAILABLE`, `REJECTED`) |
 | `make down` | stop the stack, keeping its data |
 | `make deps` | start only PostgreSQL and RabbitMQ, for running the API from source |
 | `make migrate` | apply the database migrations (to the local stack by default) |
@@ -207,6 +209,35 @@ The full list, with the block and the decision behind each, is [docs/requirement
   and the messages carry; exported to Jaeger when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
   ([ADR 0034](docs/adr/0034-distributed-tracing.md)).
 
+## Load tests
+
+`make load` sends a seeded burst through `/v1/batches` (half SMS, 30% e-mail, 20% push; 20% high, 60% normal, 20%
+low priority) and follows `/v1/metrics` until it has drained, reporting the rate per channel; one seed is one
+workload ([scripts/loadtest](scripts/loadtest/main.go), [ADR 0035](docs/adr/0035-dashboards-and-load-tests.md)).
+Watch it on the Grafana dashboard at <http://localhost:3000>.
+
+```sh
+make load N=6000 SEED=1                                    # a healthy burst
+make load N=3000 SEED=2 UNAVAILABLE=0.15 REJECTED=0.05     # 15% of SMS answered 503, 5% 422
+```
+
+**A healthy burst of 6000** was accepted in 0.53 s and sent at 99.3 (SMS), 98.4 (e-mail) and 98.6 (push) a second,
+the three channels in parallel: the rate limit holds at 100 a second per channel, and the queues drain in 30, 18 and
+12 seconds.
+
+![A burst of 6000 notifications draining at 100 a second per channel](docs/images/load-burst.png)
+
+**A burst with failing recipients found a livelock**: the retries of the SMS the provider keeps refusing open the
+channel's circuit breaker, and since they outrank the healthy SMS still waiting, every half-open probe is one of
+them, so the breaker keeps reopening and the healthy SMS wait. E-mail and push are not affected. The fix changes the
+breaker or the retries' priority, and waits for a decision ([ADR 0035](docs/adr/0035-dashboards-and-load-tests.md)).
+
+![The SMS breaker staying open while its queue stops draining](docs/images/load-breaker-livelock.png)
+
+One notification answered 503, followed in Jaeger from the API's request to each retry:
+
+![A notification's trace across the API and the worker, with its retries](docs/images/jaeger-retried-notification.png)
+
 ## Configuration
 
 Both processes read environment variables; Compose sets them, and `.env` overrides its defaults
@@ -240,7 +271,8 @@ internal/health       liveness and readiness
 internal/httpapi      the router: the middleware chain and the one place modules are mounted
 internal/platform     infrastructure: config, postgres, rabbitmq, httpx, observability, testenv
 migrations/           versioned SQL migrations, embedded in the binaries
-deploy/, compose.yaml, Dockerfile   the local stack and the image
+deploy/, compose.yaml, Dockerfile   the local stack and the image; deploy/ holds Prometheus's and Grafana's configuration
+scripts/              the smoke test and the load test
 docs/                 requirements, decisions (ADRs), the roadmap, the progression log, the development guide
 ```
 

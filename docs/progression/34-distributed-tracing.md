@@ -1,7 +1,7 @@
 # 34. Distributed tracing
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: `b566214`
 - Decisions: [ADR 0034](../adr/0034-distributed-tracing.md)
 
 ## Goal

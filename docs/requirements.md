@@ -64,5 +64,6 @@ The expected answer is `202 Accepted` with `{"messageId": "<uuid>", "status": "a
 | API documentation: Swagger / OpenAPI | `api/openapi.yaml`, rendered at `/docs`, block 28 |
 | Versioned database migrations | `migrations/`, block 14 |
 | A test suite runnable with a single command | `make test` |
+| Dashboards and load tests (asked by the owner) | Grafana and `make load`, block 35, [0035](adr/0035-dashboards-and-load-tests.md) |
 
 The technology is Go (1.2x).
