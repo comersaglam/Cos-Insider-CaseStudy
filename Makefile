@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help fmt lint verify test build check generate up deps down smoke load migrate api
+.PHONY: help fmt lint verify test build check generate diagram up deps down smoke load migrate api
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -34,6 +34,12 @@ check: verify lint test ## Everything CI runs
 
 generate: ## Regenerate the typed query code from the SQL (sqlc)
 	sqlc generate
+
+# D2 runs through go run at a pinned version, so nothing is installed.
+D2_VERSION := v0.7.2
+
+diagram: ## Render the architecture diagram, docs/architecture.d2, to docs/images/architecture.svg (D2)
+	go run oss.terrastruct.com/d2@$(D2_VERSION) docs/architecture.d2 docs/images/architecture.svg
 
 up: ## Build and start the whole service and wait until it is healthy (API on :8080, worker's metrics on :9090)
 	docker compose up --detach --build --wait

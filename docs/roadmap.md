@@ -228,6 +228,8 @@ Failure handling is covered by retries, the circuit breaker, the dead-letter que
 ### 36. Final review
 - An independent code review, the README tried on a clean machine, the commit history checked, progression and
   ADRs current.
+- **Done** ([progression 36](progression/36-closing.md)) with the D2 diagram; the independent review is left to the
+  owner's `/code-review`, and the breaker livelock found in block 35 is fixed in block 37.
 
 ## After the first version
 

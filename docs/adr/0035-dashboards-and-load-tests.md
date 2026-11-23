@@ -28,8 +28,12 @@ scaled it down to one or two small seeded runs that show the service can be meas
 
   | Run | Workload | Result |
   |---|---|---|
-  | 1 | `N=6000 SEED=1`, every recipient healthy | accepted in 0.53 s; sent at 99.3 (SMS), 98.4 (e-mail) and 98.6 (push) a second, the three channels in parallel; queues drained in 30.4 s, 17.9 s and 12.4 s |
-  | 2 | `N=3000 SEED=2 UNAVAILABLE=0.15 REJECTED=0.05` | e-mail and push drained; the SMS channel stopped: its breaker opened and stayed open (below) |
+  | 1 | `N=6000 SEED=1`, every recipient healthy | accepted in 0.59 s; drained in 30.6 s (SMS), 17.9 s (e-mail) and 12.5 s (push), in parallel: 98.7, 97.8 and 97.9 a second from the start, 100 a second at the peak |
+  | 2 | `N=3000 SEED=2 UNAVAILABLE=0.15 REJECTED=0.05` | e-mail and push drained; 94.6% of the attempts succeeded; the SMS channel stopped: its breaker opened and stayed open (below) |
+
+  The screenshots come from a stack started on empty volumes, so no earlier data shows in them. A first run against a
+  stand-in provider just started was slower (p99 latency 800 ms while its JVM warmed up, sends in flight at the
+  concurrency limit); the run shown follows it.
 
 ## Consequences
 

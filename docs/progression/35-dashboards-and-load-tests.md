@@ -1,7 +1,7 @@
 # 35. Dashboards and load tests
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: `5173e8e`
 - Decisions: [ADR 0035](../adr/0035-dashboards-and-load-tests.md)
 
 ## Goal

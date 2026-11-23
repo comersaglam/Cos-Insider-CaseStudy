@@ -1,0 +1,158 @@
+# The architecture of the notification service, rendered to docs/images/architecture.svg by `make diagram`.
+# Arrows show where data goes. The numbered edges are a notification's path; dashed ones are retries, dead letters
+# and status updates. The worker is one process, drawn on both sides of RabbitMQ: it publishes to it and consumes
+# from it.
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 0
+    dark-theme-id: 200
+    pad: 40
+    center: true
+  }
+}
+
+direction: down
+
+classes: {
+  process: {
+    style: {
+      border-radius: 12
+      stroke-width: 2
+      font-size: 24
+      bold: true
+    }
+  }
+  part: {
+    style: {
+      border-radius: 8
+      font-size: 18
+    }
+  }
+  queue: {
+    shape: queue
+    style.font-size: 17
+  }
+  side: {
+    style: {
+      stroke-dash: 4
+      font-size: 16
+    }
+  }
+  telemetry: {
+    style: {
+      stroke-dash: 2
+      stroke: "#8a8f98"
+      font-size: 15
+    }
+  }
+}
+
+clients: API clients {
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  class: part
+}
+
+watchers: Status followers {
+  icon: https://icons.terrastruct.com/tech%2Fbrowser-2.svg
+  class: part
+}
+
+api: api {
+  class: process
+  icon: https://cdn.simpleicons.org/go/00ADD8
+
+  http: "HTTP API\nnotifications · batches · templates" {class: part}
+  hub: "Status hub\nWebSocket" {class: part}
+}
+
+postgres: PostgreSQL {
+  shape: cylinder
+  icon: https://cdn.simpleicons.org/postgresql/4169E1
+  style.font-size: 18
+  label: "PostgreSQL\nnotifications · outbox"
+}
+
+publishing: "worker · publishing" {
+  class: process
+  icon: https://cdn.simpleicons.org/go/00ADD8
+  # Edges come in from above; the title sits below them.
+  label.near: bottom-right
+
+  relay: "Outbox relay" {class: part}
+  scheduler: "Scheduler\nretries · schedules" {class: part}
+}
+
+sending: "worker · sending" {
+  class: process
+  icon: https://cdn.simpleicons.org/go/00ADD8
+  label.near: bottom-right
+
+  consumers: "Consumer per channel\n100/s · lease · breaker" {class: part}
+}
+
+rabbitmq: RabbitMQ {
+  class: process
+  icon: https://cdn.simpleicons.org/rabbitmq/FF6600
+
+  exchange: "direct exchange" {class: part}
+  sms: sms {class: queue}
+  email: email {class: queue}
+  push: push {class: queue}
+  dlq: dead letters {class: queue}
+
+  exchange -> sms
+  exchange -> email
+  exchange -> push
+}
+
+provider: "Provider\nwebhook.site" {
+  icon: https://icons.terrastruct.com/essentials%2F092-network.svg
+  class: part
+}
+
+recipients: "Recipients\nphones · inboxes · devices" {
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  class: part
+}
+
+observability: "Observability: Prometheus scrapes both processes; both send their spans to Jaeger" {
+  class: process
+  near: bottom-center
+  direction: right
+
+  prometheus: Prometheus {
+    icon: https://cdn.simpleicons.org/prometheus/E6522C
+    class: part
+  }
+  grafana: Grafana {
+    icon: https://cdn.simpleicons.org/grafana/F46800
+    class: part
+  }
+  jaeger: Jaeger {
+    icon: https://cdn.simpleicons.org/jaeger/60D0E4
+    class: part
+  }
+
+  prometheus -> grafana: metrics {class: telemetry}
+  jaeger -> grafana: traces {class: telemetry}
+}
+
+# A notification's path, top to bottom. The edges back are written with <- so the layout keeps that order.
+clients -> api.http: "1 POST"
+api.http -> postgres: "2 notification + outbox"
+postgres -> publishing.relay: "3 NOTIFY"
+publishing.relay -> rabbitmq.exchange: "4 publish"
+rabbitmq.sms -> sending.consumers: "5 deliver"
+rabbitmq.email -> sending.consumers
+rabbitmq.push -> sending.consumers
+sending.consumers -> provider: "6 send"
+provider -> recipients: "SMS · e-mail · push,\nthe provider's job" {class: side}
+postgres <- sending.consumers: "7 record" {class: side}
+
+# Retries, dead letters and status updates.
+postgres <- publishing.scheduler: retries due {class: side}
+rabbitmq.dlq <- sending.consumers: unreadable {class: side}
+api.hub <- postgres: NOTIFY status {class: side}
+watchers <- api.hub: status updates {class: side}

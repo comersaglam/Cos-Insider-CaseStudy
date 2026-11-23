@@ -39,10 +39,12 @@ dereferencing an annotated tag) and keep the version comment beside it, or merge
 | `make build` | both binaries into `bin/` |
 | `make verify` | modules tidy (`go mod tidy -diff`), query code current (`sqlc diff`), no known vulnerability reaching the code (`govulncheck`, run at a pinned version) |
 | `make check` | `verify`, `lint` and `test`, what CI runs |
-| `make up` | builds the image, starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`, the worker) and waits until it is healthy |
+| `make up` | builds the image, starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`, the worker, the stand-in provider, Jaeger, Prometheus, Grafana) and waits until it is healthy |
 | `make deps` | starts only PostgreSQL and RabbitMQ, for running the API from source |
 | `make down` | stops the local stack and keeps its data |
 | `make smoke` | creates and reads a notification through the running API (`scripts/smoke.sh`) |
+| `make load` | sends a seeded burst to the running stack and measures how it drains (`N`, `SEED`, `UNAVAILABLE`, `REJECTED`; [ADR 0035](adr/0035-dashboards-and-load-tests.md)) |
+| `make diagram` | renders `docs/architecture.d2` to `docs/images/architecture.svg` with D2, run through `go run` at a pinned version |
 | `make migrate` | applies the migrations to the local stack's database (`go run ./cmd/api migrate`) |
 | `make api` | runs the API from source on `:8080` against the local stack (after `make deps`) |
 

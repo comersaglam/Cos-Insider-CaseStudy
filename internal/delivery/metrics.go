@@ -55,6 +55,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
+// start creates the channel's counter series at zero. Prometheus takes a counter's first sample as its starting
+// point, so a series created by its first event would hide that event, and those up to the next scrape, from rate()
+// and increase(): the first failures of a burst would go uncounted.
+func (m *Metrics) start(channel string) {
+	for _, class := range []Class{Success, Permanent, PermanentAlert, Transient} {
+		m.attempts.WithLabelValues(channel, string(class))
+	}
+	m.takeovers.WithLabelValues(channel)
+	m.deadLettered.WithLabelValues(channel)
+}
+
 // breakerValue maps a breaker state to the gauge's value.
 func breakerValue(s gobreaker.State) float64 {
 	switch s {

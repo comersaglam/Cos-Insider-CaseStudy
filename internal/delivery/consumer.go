@@ -102,6 +102,7 @@ func NewConsumer(s store, snd sender, cfg ConsumerConfig, metrics *Metrics, log 
 	log = log.With("channel", cfg.Channel)
 	channel := string(cfg.Channel)
 	metrics.breakerState.WithLabelValues(channel).Set(0)
+	metrics.start(channel)
 	return &Consumer{
 		store: s, send: snd, cfg: cfg, metrics: metrics, channel: channel, log: log,
 		limiter: rate.NewLimiter(rate.Limit(cfg.RatePerSecond), 1),

@@ -38,6 +38,9 @@ computed by a PromQL query, so a person reading it with `curl` sees raw counts. 
   is `null`, not 0. The window is measured by the database's clock.
 - **Indexes** for the scrape and the summary: waiting notifications by channel and status (partial), attempts by
   time.
+- **Every counter series of a channel starts at zero** when its consumer is built. Prometheus takes a series' first
+  sample as its starting point, so a series created by its first failure hid that failure, and those until the next
+  scrape, from `rate()` and `increase()`; block 35's load test showed it (22 permanent failures counted as 0).
 
 ## Consequences
 

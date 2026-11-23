@@ -66,3 +66,37 @@ func TestBreakerStateIsAGauge(t *testing.T) {
 		t.Errorf("breaker state after three failures = %v, want 2 (open)", got)
 	}
 }
+
+// TestConsumerReportsEveryOutcomeFromTheStart: every channel and outcome series exists, at zero, as soon as the
+// consumer is built. Prometheus takes a counter's first sample as its starting point, so a series born with its
+// first failure would hide that failure from rate() and increase(): a burst's first failures went uncounted.
+func TestConsumerReportsEveryOutcomeFromTheStart(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	NewConsumer(&fakeStore{}, fakeSender{}, testConfig(), NewMetrics(reg), discard)
+	want := map[string]bool{}
+	for _, class := range []Class{Success, Permanent, PermanentAlert, Transient} {
+		want[`notifications_delivery_attempts_total{channel="sms",outcome="`+string(class)+`"}`] = true
+	}
+	want[`notifications_claim_takeovers_total{channel="sms"}`] = true
+	want[`notifications_dead_lettered_total{channel="sms"}`] = true
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			series := f.GetName() + "{"
+			for i, l := range m.GetLabel() {
+				if i > 0 {
+					series += ","
+				}
+				series += l.GetName() + `="` + l.GetValue() + `"`
+			}
+			delete(want, series+"}")
+		}
+	}
+	for series := range want {
+		t.Errorf("%s is missing until its first event", series)
+	}
+}

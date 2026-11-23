@@ -75,6 +75,7 @@ the provider is an `httptest.Server`. The suite holds:
 | `make fmt` | format the code |
 | `make build` | build both binaries into `bin/` |
 | `make generate` | regenerate the typed query code from the SQL (sqlc) |
+| `make diagram` | render the architecture diagram from `docs/architecture.d2` (D2) |
 | `make help` | list the targets |
 
 ## Trying the API
@@ -146,7 +147,51 @@ Treat the URL as a secret: anyone who has it can read what is sent to it. The se
 
 ## How it works
 
-Two processes run from one image: **`api`** accepts and reads notifications, and **`worker`** delivers them.
+Two processes run from one image: **`api`** accepts and reads notifications, and **`worker`** delivers them. Arrows
+show where data goes; the numbers follow a notification, and the dashed edges are retries, dead letters, status updates
+and the provider's own delivery ([source](docs/architecture.d2), `make diagram`).
+
+<p align="center"><img src="docs/images/architecture.svg" alt="The architecture: API, PostgreSQL with the outbox, the worker's relay and scheduler, RabbitMQ, the worker's consumers, the provider, and observability" width="720"></p>
+
+<details>
+<summary>The same architecture as text</summary>
+
+```
+ API clients (the company's services)                         Status followers (dashboards)
+            │                                                                 ▲
+            │ 1  POST /v1/notifications, /v1/batches                          │ status updates
+            ▼                                                                 │ (WebSocket)
+┌─ api (Go) ──────────────────────────────────────────────────────────────────┴────────────┐
+│  HTTP API: validate · render templates · idempotency · 202          Status hub           │
+└───────────┬─────────────────────────────────────────────────────────────────▲────────────┘
+            │ 2  the notification and its outbox row,                         │ NOTIFY status
+            ▼    in one transaction                                           │ (a trigger)
+┌─ PostgreSQL, the source of truth ───────────────────────────────────────────┴────────────┐
+│  notifications · outbox · delivery_attempts · templates · batches                        │
+└───────────┬───────────────────────▲─────────────────────────────────▲────────────────────┘
+            │ 3  NOTIFY,            │ retries and schedules           │ 7  claim under a lease,
+            │    read rows          │ due → outbox                    │    record each attempt
+            ▼                       │                                 │
+┌─ worker (Go) ─────────────────────┴─────────────────────────────────┴────────────────────┐
+│  Outbox relay             Scheduler: each second,            Consumer per channel:       │
+│                           reaps lost claims                  100/s · lease · breaker     │
+└───────────┬─────────────────────────────────────────────────────▲─────────────────┬──────┘
+            │ 4  publish: confirmed,                              │ 5 deliver       │ 6  POST {to, channel,
+            │    by priority                                      │                 │    content}
+            ▼                                                     │                 ▼
+┌─ RabbitMQ ─────────────────────────────────────────────┐        │      Provider (webhook.site)
+│  direct exchange "notifications"                       │        │                 │
+│    ├─► notifications.sms   ─┐                          │        │                 │ SMS · e-mail · push,
+│    ├─► notifications.email ─┼─ priority 0-2,           ├────────┘                 │ the provider's job
+│    ├─► notifications.push  ─┘  one active consumer     │                          ▼
+│    └── notifications.dlq   ◄── unreadable, rejected    │                     Recipients
+└────────────────────────────────────────────────────────┘
+
+Observability: /metrics of api (:8080) and worker (:9090) ──► Prometheus ──► Grafana
+               spans of api and worker ── OTLP ──► Jaeger ──► Grafana
+```
+
+</details>
 
 1. The API validates a notification and, in one transaction, stores it in PostgreSQL as `queued` and writes an
    outbox row. PostgreSQL is the source of truth: a notification is never lost between the database and the
@@ -221,15 +266,16 @@ make load N=6000 SEED=1                                    # a healthy burst
 make load N=3000 SEED=2 UNAVAILABLE=0.15 REJECTED=0.05     # 15% of SMS answered 503, 5% 422
 ```
 
-**A healthy burst of 6000** was accepted in 0.53 s and sent at 99.3 (SMS), 98.4 (e-mail) and 98.6 (push) a second,
-the three channels in parallel: the rate limit holds at 100 a second per channel, and the queues drain in 30, 18 and
-12 seconds.
+**A healthy burst of 6000** was accepted in 0.59 s and drained in 30.6 (SMS), 17.9 (e-mail) and 12.5 (push)
+seconds, the three channels in parallel: 98.7, 97.8 and 97.9 a second counted from the start, and 100 a second at the
+peak, where the rate limit holds them; the limiter spaces sends 10 ms apart.
 
 ![A burst of 6000 notifications draining at 100 a second per channel](docs/images/load-burst.png)
 
 **A burst with failing recipients found a livelock**: the retries of the SMS the provider keeps refusing open the
 channel's circuit breaker, and since they outrank the healthy SMS still waiting, every half-open probe is one of
-them, so the breaker keeps reopening and the healthy SMS wait. E-mail and push are not affected. The fix changes the
+them, so the breaker keeps reopening and the healthy SMS wait: 94.6% of the run's attempts succeed, then SMS stops.
+E-mail and push are not affected. The fix changes the
 breaker or the retries' priority, and waits for a decision ([ADR 0035](docs/adr/0035-dashboards-and-load-tests.md)).
 
 ![The SMS breaker staying open while its queue stops draining](docs/images/load-breaker-livelock.png)
@@ -288,3 +334,5 @@ verification and commits, and [docs/roadmap.md](docs/roadmap.md) holds the plan.
 - **Authentication**: the brief does not ask for it; it would sit in a gateway in front, or in one middleware.
 - **Exactly-once delivery**: not possible with a provider that is called over HTTP; delivery is at least once, and
   the provider receives an idempotency key to drop repeats.
+- **Delivery receipts**: `sent` means the provider accepted the message. Delivering it to the phone, inbox or device
+  is the provider's job, and its later report of that (a callback) is not consumed; webhook.site sends none.
