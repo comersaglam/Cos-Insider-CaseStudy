@@ -59,6 +59,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: handlers with a fake service; the service with a fake store; end to end with a real database; two
   requests with one `Idempotency-Key` make one notification; a request in progress completes during shutdown.
 - **Watch**: server timeouts; `202 Accepted` rather than `201`, since the notification is accepted, not sent.
+- **Decided** ([ADR 0016](adr/0016-http-api-and-the-api-process.md)): `202` with `Location` and
+  `Idempotent-Replayed`; migrations as a separate `api migrate` step; `api/openapi.yaml` by hand, from this block on.
 
 ### 16. Batch create and batch status
 - **Scope**: `POST /v1/notifications/batch` (up to 1000), `GET /v1/batches/{id}` with counts per status.
@@ -80,8 +82,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ### 18. One-command stack
 - **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate`, `api` and `worker`
-  services added to `compose.yaml` next to the dependencies from block 09; `depends_on` conditions on health;
-  `make migrate`.
+  services added to `compose.yaml` next to the dependencies from block 09; the `migrate` service runs `api migrate`,
+  and `api` and `worker` wait for it to complete; `depends_on` conditions on health.
 - **Tests**: health endpoints after `docker compose up`; a smoke script that creates a notification and reads it.
 - **Watch**: image size; the webhook.site URL comes from the environment.
 
@@ -155,9 +157,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 ## Phase 4: deliverables
 
 ### 28. OpenAPI and Swagger UI
-- `api/openapi.yaml` (3.1) served with Swagger UI at `/docs`; a test checks every registered route is in the spec
-  and the spec is valid.
-- **Open question**: written by hand (design first) or generated from code.
+- `api/openapi.yaml` (3.1), written by hand since block 15 ([ADR 0016](adr/0016-http-api-and-the-api-process.md)),
+  served with Swagger UI at `/docs`; a test checks every registered route is in the spec and the spec is valid,
+  with a pinned validator.
 
 ### 29. README
 - Setup, architecture diagram (Mermaid), curl examples, a summary of the decisions linking the ADRs, and what is

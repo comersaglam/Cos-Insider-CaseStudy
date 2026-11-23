@@ -1,7 +1,101 @@
 // Command api serves the notification management HTTP API.
 //
-// It is the composition root of the API process: it builds the configuration, the
-// platform clients and the modules, mounts them through httpapi and serves them.
+// Usage:
+//
+//	api            serve the API (the default)
+//	api serve      the same
+//	api migrate    apply the database migrations, then exit
+//
+// It is the composition root of the API process: it reads the configuration, builds the platform clients and the
+// modules, mounts them through httpapi and serves them until SIGINT or SIGTERM, then shuts down gracefully.
+//
+// Configuration, from the environment:
+//
+//	DATABASE_URL       PostgreSQL URL; pool settings such as pool_max_conns may be added to it (required)
+//	HTTP_ADDR          address to listen on (default :8080)
+//	LOG_LEVEL          debug, info, warn or error (default info)
+//	SHUTDOWN_TIMEOUT   how long requests in flight may take to finish when stopping (default 15s)
 package main
 
-func main() {}
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/config"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/httpx"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/migrations"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:], os.LookupEnv, os.Stdout)
+	stop()
+	if err != nil {
+		// The logger may not exist yet (the configuration it depends on may be what failed), so plain stderr.
+		fmt.Fprintln(os.Stderr, "api:", err)
+		os.Exit(1)
+	}
+}
+
+// run is the whole program, with its inputs passed in so that tests can drive it: it returns when ctx is
+// cancelled and the server has shut down, or when anything fails.
+func run(ctx context.Context, args []string, lookup func(string) (string, bool), stdout io.Writer) error {
+	command := "serve"
+	if len(args) > 0 {
+		command = args[0]
+	}
+	if command != "serve" && command != "migrate" {
+		return fmt.Errorf("unknown command %q; use serve or migrate", command)
+	}
+
+	cfg := config.NewReader(lookup)
+	databaseURL := cfg.Secret("DATABASE_URL")
+	addr := cfg.String("HTTP_ADDR", ":8080")
+	level := cfg.LogLevel("LOG_LEVEL", slog.LevelInfo)
+	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
+	if err := cfg.Err(); err != nil {
+		return fmt.Errorf("invalid configuration:\n%w", err)
+	}
+	log := observability.NewLogger(stdout, level)
+	log.InfoContext(ctx, "configuration loaded", "command", command, "config", cfg)
+
+	pool, err := postgres.Connect(ctx, databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if command == "migrate" {
+		if err := postgres.Migrate(pool, migrations.FS); err != nil {
+			return err
+		}
+		log.InfoContext(ctx, "migrations applied")
+		return nil
+	}
+
+	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log)
+	srv := httpx.NewServer(httpapi.NewRouter(log, notifications), log)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	log.InfoContext(ctx, "serving HTTP", "addr", ln.Addr().String())
+
+	// Serve returns once the server has stopped; the deferred pool.Close then runs, after the last request.
+	if err := httpx.Serve(ctx, srv, ln, shutdownTimeout); err != nil {
+		return err
+	}
+	log.InfoContext(ctx, "stopped")
+	return nil
+}

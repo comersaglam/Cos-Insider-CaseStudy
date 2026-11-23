@@ -1,7 +1,7 @@
 # 14. Database and store
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `6ccf017`
 - Decisions: [ADR 0015](../adr/0015-storage-ids-and-idempotency.md), amending
   [ADR 0011](../adr/0011-notification-domain.md)
 

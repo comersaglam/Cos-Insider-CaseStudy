@@ -30,8 +30,10 @@ extension (`gopls`, format on save).
 | `make check` | `lint` and `test`, what CI runs |
 | `make up` | starts the local stack and waits until it is healthy |
 | `make down` | stops the local stack and keeps its data |
+| `make migrate` | applies the migrations to the local stack's database (`go run ./cmd/api migrate`) |
+| `make api` | runs the API on `:8080` against the local stack |
 
-Targets added with the parts they serve: `migrate`.
+
 
 ## Local stack
 
@@ -48,6 +50,9 @@ Targets added with the parts they serve: `migrate`.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.
 - `docker compose down --volumes` deletes the data and starts the next `make up` from empty.
 - Image tags are the ones in `internal/platform/testenv`; change both together, or `make test` fails.
+- To try the API: `make up`, `make migrate`, `make api`, then
+  `curl -i -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' -d '{"to":"+905551234567","channel":"sms","content":"Hello"}'`.
+  The contract is [api/openapi.yaml](../api/openapi.yaml).
 
 ## Where code goes
 

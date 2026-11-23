@@ -1,0 +1,230 @@
+openapi: 3.1.0
+info:
+  title: Notification API
+  version: 0.1.0
+  summary: Accepts notifications and reports their delivery over SMS, e-mail and push.
+  description: |
+    Notifications are accepted here and delivered asynchronously by workers through an external provider
+    (docs/adr). This file is the API's contract, written by hand (design first) and changed in the same commit
+    as the behaviour it describes.
+
+    Every error answer is `application/problem+json` (RFC 9457) with a stable `code`, the request's
+    `correlationId`, and, for invalid requests, `errors` located by JSON Pointer.
+
+    Every request may carry `X-Correlation-ID` (1 to 128 visible ASCII characters); every answer carries the ID
+    the request was handled under, the client's or a new one.
+servers:
+  - url: http://localhost:8080
+    description: the local stack
+
+paths:
+  /v1/notifications:
+    post:
+      operationId: createNotification
+      summary: Accept a notification for sending
+      description: |
+        Validates the notification, stores it as `queued` and answers at once; a worker sends it later. The
+        answer is `202 Accepted` because the notification is accepted, not yet sent: follow `Location` to see
+        its status.
+
+        With an `Idempotency-Key`, repeating the request returns the first notification, marked with
+        `Idempotent-Replayed: true`, however much later it is repeated. The same key with a different request is
+        refused with `422 idempotency_key_reused`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNotificationRequest'
+            example:
+              to: '+905551234567'
+              channel: sms
+              content: Your order has shipped.
+              priority: high
+      responses:
+        '202':
+          description: Accepted for sending, or a repeat of an accepted request.
+          headers:
+            Location:
+              description: The notification's URL.
+              schema: { type: string, example: /v1/notifications/0193a8f2-7c1e-7b3a-9d4e-2f1a3b4c5d6e }
+            Idempotent-Replayed:
+              description: Present, as `true`, when the request repeats an earlier one with the same key.
+              schema: { type: string, enum: ['true'] }
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          description: >-
+            The body is not valid JSON (`invalid_json`), has a member the request does not define
+            (`unknown_field`), or the `Idempotency-Key` header is malformed (`invalid_idempotency_key`).
+          $ref: '#/components/responses/Problem'
+        '413':
+          description: The body is larger than 1 MiB (`body_too_large`).
+          $ref: '#/components/responses/Problem'
+        '415':
+          description: The body is not sent as `application/json` (`unsupported_media_type`).
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: >-
+            The notification breaks a rule (`validation_failed`, with `errors`), or the idempotency key was used for
+            a different request (`idempotency_key_reused`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+  /v1/notifications/{id}:
+    get:
+      operationId: getNotification
+      summary: Read a notification and its status
+      parameters:
+        - $ref: '#/components/parameters/NotificationID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The notification.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '404':
+          description: No notification has this ID, or the ID is not a UUID (`not_found`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+components:
+  parameters:
+    NotificationID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >-
+        A key the client chooses for the request, unique to it, such as `order-42-sms`. It never expires.
+      schema: { type: string, minLength: 1, maxLength: 255, pattern: '^[!-~]+$' }
+    CorrelationID:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: An ID that joins the logs of everything this request causes; a new one is made when absent or invalid.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[!-~]+$' }
+
+  headers:
+    CorrelationID:
+      description: The correlation ID the request was handled under.
+      schema: { type: string }
+
+  responses:
+    Problem:
+      description: An error, as RFC 9457 describes it.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Channel:
+      type: string
+      enum: [sms, email, push]
+    Priority:
+      type: string
+      enum: [high, normal, low]
+      description: Orders waiting work within a channel; it is not sent to the provider.
+    Status:
+      type: string
+      enum: [scheduled, queued, sending, retrying, sent, failed, cancelled]
+      description: |
+        `scheduled` and `queued` wait; `sending` is with a worker; `retrying` waits for its next attempt;
+        `sent`, `failed` and `cancelled` are where a notification ends (a failed one can be retried).
+
+    CreateNotificationRequest:
+      type: object
+      additionalProperties: false
+      required: [to, channel, content]
+      properties:
+        to:
+          type: string
+          description: The recipient, in the form the channel requires (below). It is never reformatted.
+        channel:
+          $ref: '#/components/schemas/Channel'
+        content:
+          type: string
+          minLength: 1
+          description: >-
+            The message, counted in characters, not bytes. It must not be blank and must not contain the NUL
+            character.
+        priority:
+          $ref: '#/components/schemas/Priority'
+          default: normal
+      allOf:
+        - if: { properties: { channel: { const: sms } } }
+          then:
+            properties:
+              to: { pattern: '^\+[1-9][0-9]{1,14}$', description: 'E.164, such as +905551234567' }
+              content: { maxLength: 1600 }
+        - if: { properties: { channel: { const: email } } }
+          then:
+            properties:
+              to: { format: email, maxLength: 254, description: 'one address, without a display name' }
+              content: { maxLength: 100000 }
+        - if: { properties: { channel: { const: push } } }
+          then:
+            properties:
+              to: { pattern: '^[!-~]{1,512}$', description: 'a device token of visible ASCII characters' }
+              content: { maxLength: 1000 }
+
+    Notification:
+      type: object
+      required: [id, to, channel, content, priority, status, correlationId, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid, description: 'A version 7 UUID; it sorts by creation time.' }
+        to: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        content: { type: string }
+        priority: { $ref: '#/components/schemas/Priority' }
+        status: { $ref: '#/components/schemas/Status' }
+        correlationId: { type: string }
+        createdAt: { type: string, format: date-time, description: 'UTC' }
+        updatedAt: { type: string, format: date-time, description: 'UTC' }
+
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, description: 'Always about:blank; `code` names the problem.' }
+        title: { type: string, description: 'The HTTP status text.' }
+        status: { type: integer }
+        detail: { type: string }
+        code:
+          type: string
+          description: Stable and machine-readable; clients switch on it, never on `detail`.
+          examples: [validation_failed, idempotency_key_reused, not_found, invalid_json, internal_error]
+        correlationId: { type: string }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/FieldProblem' }
+
+    FieldProblem:
+      type: object
+      required: [pointer, code, detail]
+      properties:
+        pointer: { type: string, description: 'A JSON Pointer to the member, such as /to.', example: /to }
+        code: { type: string, enum: [required, invalid, too_long] }
+        detail: { type: string }

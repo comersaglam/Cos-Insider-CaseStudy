@@ -23,6 +23,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0013](0013-platform-conventions.md) | Platform conventions: configuration, logging, correlation, errors and JSON | Accepted |
 | [0014](0014-dead-letters-and-replay.md) | Dead letters and replay | Accepted |
 | [0015](0015-storage-ids-and-idempotency.md) | Storage: identifiers, idempotency and schema conventions | Accepted |
+| [0016](0016-http-api-and-the-api-process.md) | The HTTP API and the API process | Accepted |
 
 ## Template
 
