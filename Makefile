@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help fmt lint test build check generate up down migrate api
+.PHONY: help fmt lint test build check generate up deps down smoke migrate api
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -26,11 +26,17 @@ check: lint test ## Everything CI runs
 generate: ## Regenerate the typed query code from the SQL (sqlc)
 	sqlc generate
 
-up: ## Start PostgreSQL and RabbitMQ and wait until they are healthy
-	docker compose up --detach --wait
+up: ## Build and start the whole service (PostgreSQL, RabbitMQ, migrations, API on :8080)
+	docker compose up --detach --build --wait
+
+deps: ## Start only PostgreSQL and RabbitMQ, for running the API from source (make api)
+	docker compose up --detach --wait postgres rabbitmq
 
 down: ## Stop the local stack, keeping its data (docker compose down --volumes deletes it)
 	docker compose down
+
+smoke: ## Create and read a notification through the running API
+	scripts/smoke.sh
 
 # The local stack's database, as compose.yaml starts it; set DATABASE_URL to use another.
 DATABASE_URL ?= postgres://notifications:notifications@localhost:5432/notifications?sslmode=disable
@@ -38,5 +44,5 @@ DATABASE_URL ?= postgres://notifications:notifications@localhost:5432/notificati
 migrate: ## Apply the database migrations (to the local stack by default)
 	DATABASE_URL='$(DATABASE_URL)' go run ./cmd/api migrate
 
-api: ## Run the API against the local stack
+api: ## Run the API from source against the local stack (make deps first)
 	DATABASE_URL='$(DATABASE_URL)' go run ./cmd/api

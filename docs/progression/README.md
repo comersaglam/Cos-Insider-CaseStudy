@@ -29,7 +29,8 @@ finds the commit that finished block NN.
 | [14](14-database-and-store.md) | Database and store | 2026-11-23 | First migration, pool and migrator, per-test databases, sqlc, idempotent create | `6ccf017` |
 | [15](15-create-get-and-a-running-api.md) | Create, get and a running API | 2026-11-23 | `POST` and `GET` notifications served by `cmd/api`, graceful shutdown, `api migrate`, the OpenAPI contract begun | `d222e94` |
 | [16](16-batches.md) | Batch create and batch status | 2026-11-23 | Up to 1000 per request, valid items accepted and invalid ones reported, rejections kept without content | `78e1dcb` |
-| [17](17-list-cancel-and-retry.md) | List, cancel and retry | 2026-11-23 | Keyset-paged list with filters, safe cancel, single and bulk retry | this block's commit |
+| [17](17-list-cancel-and-retry.md) | List, cancel and retry | 2026-11-23 | Keyset-paged list with filters, safe cancel, single and bulk retry | `44b22f8` |
+| [18](18-one-command-stack.md) | One-command stack | 2026-11-23 | A 23.5 MB distroless image; `docker compose up` migrates and serves the API | this block's commit |
 
 ## Template
 

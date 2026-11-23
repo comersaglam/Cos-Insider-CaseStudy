@@ -1,7 +1,7 @@
 # 17. List, cancel and retry
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `44b22f8`
 - Decisions: [ADR 0018](../adr/0018-listing-cancelling-and-retrying.md); bulk retry from
   [ADR 0014](../adr/0014-dead-letters-and-replay.md)
 

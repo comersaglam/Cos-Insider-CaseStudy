@@ -17,7 +17,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0007](0007-delivery-and-retry.md) | Delivery and retry | Accepted, amended by 0014 |
 | [0008](0008-modular-monolith-layout.md) | Modular monolith: packages by feature, a platform layer and one central router | Accepted |
 | [0009](0009-concurrency-model.md) | Concurrency model | Accepted |
-| [0010](0010-local-environment-with-docker-compose.md) | Local environment with Docker Compose | Accepted |
+| [0010](0010-local-environment-with-docker-compose.md) | Local environment with Docker Compose | Accepted, amended by 0019 |
 | [0011](0011-notification-domain.md) | Notification domain: the provider contract, statuses and validation | Accepted, amended by 0014 and 0015 |
 | [0012](0012-message-flow-and-delivery-guarantee.md) | Message flow and delivery guarantee | Accepted |
 | [0013](0013-platform-conventions.md) | Platform conventions: configuration, logging, correlation, errors and JSON | Accepted |
@@ -26,6 +26,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0016](0016-http-api-and-the-api-process.md) | The HTTP API and the API process | Accepted |
 | [0017](0017-batches.md) | Batches: partial acceptance, kept rejections and a body limit | Accepted |
 | [0018](0018-listing-cancelling-and-retrying.md) | Listing, cancelling and retrying | Accepted |
+| [0019](0019-container-image-and-the-one-command-stack.md) | The container image and the one-command stack | Accepted |
 
 ## Template
 

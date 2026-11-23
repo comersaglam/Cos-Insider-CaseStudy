@@ -1,8 +1,17 @@
-# The local stack: PostgreSQL and RabbitMQ for running and inspecting the service by hand (docs/adr/0010).
-# Tests do not use it; they start their own containers from the same images, which internal/platform/testenv
-# names and a test keeps equal to the tags below. `make up` starts it, `make down` stops it.
+# The whole service in one command (docs/adr/0010, 0019): `docker compose up` builds the image, starts PostgreSQL
+# and RabbitMQ, applies the migrations, then serves the API on http://localhost:8080.
+# Tests do not use this file; they start their own containers from the same images, which
+# internal/platform/testenv names and a test keeps equal to the tags below.
 
 name: notifications
+
+# The application's settings, shared by every service that runs the image.
+x-app: &app
+  build: .
+  image: notifications:local
+  environment:
+    DATABASE_URL: postgres://${POSTGRES_USER:-notifications}:${POSTGRES_PASSWORD:-notifications}@postgres:5432/${POSTGRES_DB:-notifications}?sslmode=disable
+    LOG_LEVEL: ${LOG_LEVEL:-info}
 
 services:
   postgres:
@@ -47,6 +56,24 @@ services:
       timeout: 10s
       retries: 10
       start_period: 20s
+
+  # Applies the migrations, then exits; the services that use the database wait for it (ADR 0016).
+  migrate:
+    <<: *app
+    command: ["api", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["api"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   postgres-data:

@@ -1,6 +1,6 @@
 # 0010. Local environment with Docker Compose
 
-- Status: Accepted
+- Status: Accepted; amended by [0019](0019-container-image-and-the-one-command-stack.md) (Compose runs the service)
 - Date: 2026-11-23
 
 ## Context

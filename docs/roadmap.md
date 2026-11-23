@@ -83,11 +83,13 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   unknown parameters refused; cancel repeatable, `409` once sending; bulk retry capped at 10,000 per request.
 
 ### 18. One-command stack
-- **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate`, `api` and `worker`
-  services added to `compose.yaml` next to the dependencies from block 09; the `migrate` service runs `api migrate`,
-  and `api` and `worker` wait for it to complete; `depends_on` conditions on health.
-- **Tests**: health endpoints after `docker compose up`; a smoke script that creates a notification and reads it.
-- **Watch**: image size; the webhook.site URL comes from the environment.
+- **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate` and `api`
+  services added to `compose.yaml` next to the dependencies from block 09; `api` waits for `migrate` to complete;
+  `make up`, `make deps`, `make smoke`.
+- **Tests**: `docker compose up` brings the API up; `scripts/smoke.sh` creates a notification, reads it and repeats
+  it; `docker compose stop` stops it cleanly.
+- **Decided** ([ADR 0019](adr/0019-container-image-and-the-one-command-stack.md)): distroless `static` `nonroot`,
+  pinned by digest, 23.5 MB; the worker service joins in block 24 and the API's health check in block 26.
 
 ## Phase 2: the processing engine
 
@@ -138,6 +140,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   `/healthz`.
 - **Tests**: end to end: API → PostgreSQL → relay → RabbitMQ → consumer → fake provider → `sent`; shutdown with
   messages in flight loses none.
+- **Compose**: the `worker` service joins `compose.yaml`, running the same image, after `migrate`, with
+  `restart: unless-stopped` (ADR 0009, 0019).
 
 ## Phase 3: observability
 

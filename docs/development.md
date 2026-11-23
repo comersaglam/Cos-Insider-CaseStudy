@@ -28,29 +28,34 @@ extension (`gopls`, format on save).
 | `make generate` | regenerates the typed query code from the SQL with `sqlc` |
 | `make build` | both binaries into `bin/` |
 | `make check` | `lint` and `test`, what CI runs |
-| `make up` | starts the local stack and waits until it is healthy |
+| `make up` | builds the image and starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`) |
+| `make deps` | starts only PostgreSQL and RabbitMQ, for running the API from source |
 | `make down` | stops the local stack and keeps its data |
+| `make smoke` | creates and reads a notification through the running API (`scripts/smoke.sh`) |
 | `make migrate` | applies the migrations to the local stack's database (`go run ./cmd/api migrate`) |
-| `make api` | runs the API on `:8080` against the local stack |
+| `make api` | runs the API from source on `:8080` against the local stack (after `make deps`) |
 
 
 
 ## Local stack
 
-`compose.yaml` runs PostgreSQL and RabbitMQ for running and inspecting the service by hand
-([ADR 0010](adr/0010-local-environment-with-docker-compose.md)). Tests do not need it.
+`compose.yaml` runs the whole service: PostgreSQL, RabbitMQ, the migrations and the API
+([ADR 0010](adr/0010-local-environment-with-docker-compose.md), [ADR 0019](adr/0019-container-image-and-the-one-command-stack.md)).
+Tests do not need it.
 
 | Service | Address | Credentials |
 |---|---|---|
 | PostgreSQL | `postgres://localhost:5432/notifications` | `notifications` / `notifications` |
 | RabbitMQ (AMQP) | `amqp://localhost:5672` | `notifications` / `notifications` |
 | RabbitMQ management UI | <http://localhost:15672> | `notifications` / `notifications` |
+| API (after `make up`) | <http://localhost:8080> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.
 - `docker compose down --volumes` deletes the data and starts the next `make up` from empty.
 - Image tags are the ones in `internal/platform/testenv`; change both together, or `make test` fails.
-- To try the API: `make up`, `make migrate`, `make api`, then
+- To try the API: `make up` and `make smoke`. To work on it from source: `make deps`, `make migrate`, `make api`,
+  then
   `curl -i -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' -d '{"to":"+905551234567","channel":"sms","content":"Hello"}'`.
   The contract is [api/openapi.yaml](../api/openapi.yaml).
 
