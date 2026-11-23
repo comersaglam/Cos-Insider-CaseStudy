@@ -99,6 +99,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
 - **Tests** (RabbitMQ through testcontainers): topology declaration is idempotent; an unconfirmed publish fails;
   priority order; a second consumer receives nothing under single active consumer.
+- **Decided** ([ADR 0020](adr/0020-rabbitmq-platform.md)): the platform declares a topology it is given; mandatory
+  publishes so an unroutable message fails instead of vanishing; batches of 256 confirmed before the next;
+  amqp091-go v1.17 and the testcontainers RabbitMQ module.
 
 ### 20. Dispatch: outbox relay and scheduler
 - **Scope**: the relay takes unpublished outbox rows with `SKIP LOCKED`, publishes and marks them after the confirm,

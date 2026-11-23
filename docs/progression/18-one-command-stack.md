@@ -1,7 +1,7 @@
 # 18. One-command stack
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `b569c52`
 - Decisions: [ADR 0019](../adr/0019-container-image-and-the-one-command-stack.md), amending
   [ADR 0010](../adr/0010-local-environment-with-docker-compose.md)
 
