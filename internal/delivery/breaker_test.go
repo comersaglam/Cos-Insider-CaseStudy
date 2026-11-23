@@ -176,3 +176,33 @@ func TestBreakerOpensOnAFailureRatioNotARun(t *testing.T) {
 		t.Errorf("half of ten attempts failed: breaker %s, want open", got)
 	}
 }
+
+// TestBreakerProbesWithAFreshMessageBeforeARetry (ADR 0036): a retry the consumer already holds when the breaker
+// half-opens goes back to RabbitMQ once, which hands out the highest priority first, so a fresh notification is the
+// probe. Otherwise every held retry of a refused recipient would be a failing probe, 30 seconds apart.
+func TestBreakerProbesWithAFreshMessageBeforeARetry(t *testing.T) {
+	var a acks
+	cfg := breakerConfig()
+	cfg.BreakerOpen = 200 * time.Millisecond
+	sender := &scriptedSender{script: []Outcome{unavailable, unavailable, unavailable, accepted}}
+	c := NewConsumer(&fakeStore{}, sender, cfg, testMetrics(), discard)
+	retry := message(t)
+	retry.Priority = 0
+	msgs := deliveriesOf(&a, message(t), message(t), message(t), retry, message(t))
+
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx, msgs) }()
+	// Three failures and the probe are acknowledged; the retry is given back, or sent as the probe.
+	waitUntil(t, func() bool { acked, _ := a.counts(); return acked >= 4 })
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(a.requeued) != 1 || a.requeued[0] != 4 {
+		t.Errorf("requeued %v, want the retry (tag 4)", a.requeued)
+	}
+	if c.breaker.State() != gobreaker.StateClosed {
+		t.Errorf("breaker is %s, want closed after the fresh probe", c.breaker.State())
+	}
+}

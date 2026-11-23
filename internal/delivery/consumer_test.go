@@ -137,7 +137,7 @@ func deliveriesOf(ack amqp.Acknowledger, bodies ...amqp.Delivery) <-chan amqp.De
 	return ch
 }
 
-// message is a well-formed delivery for a new notification ID.
+// message is a well-formed delivery for a new notification ID, at normal priority, as a first attempt is published.
 func message(t *testing.T) amqp.Delivery {
 	t.Helper()
 	id := uuid.NewV7()
@@ -145,7 +145,7 @@ func message(t *testing.T) amqp.Delivery {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return amqp.Delivery{Body: body, MessageId: id.String()}
+	return amqp.Delivery{Body: body, MessageId: id.String(), Priority: notification.PriorityNormal.Rank()}
 }
 
 // runUntilSettled runs the consumer until want deliveries are settled, then stops it and returns Run's result.

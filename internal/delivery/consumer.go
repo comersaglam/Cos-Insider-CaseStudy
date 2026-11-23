@@ -192,6 +192,14 @@ func (c *Consumer) Run(ctx context.Context, deliveries <-chan amqp.Delivery) err
 			if !ok {
 				return c.drain(results, inFlight, ErrDeliveriesClosed)
 			}
+			// A retry held since the breaker opened goes back once, so RabbitMQ hands out a fresher notification
+			// as the probe if one waits (ADR 0036); it comes back redelivered, and probes if nothing fresher does.
+			if c.breaker.State() == gobreaker.StateHalfOpen && d.Priority == 0 && !d.Redelivered {
+				if err := d.Nack(false, true); err != nil {
+					return fmt.Errorf("requeue a held retry: %w", err)
+				}
+				continue
+			}
 			waitStart := time.Now()
 			if err := c.limiter.Wait(ctx); err != nil {
 				// Stopped while waiting for the rate: d is left for RabbitMQ to deliver again.

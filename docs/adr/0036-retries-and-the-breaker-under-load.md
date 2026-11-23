@@ -42,10 +42,12 @@ provider is down.
   set it back by seconds to minutes.
 - **Run 2 again** (seed 2): all 1488 healthy SMS sent in 17 s; the breaker opened after them, when only the refused
   recipient's retries were left, and those 243 waited without spending attempts.
-- **A limit left**: the consumer holds up to its prefetch count (32) of delivered messages. If the breaker opens
-  while they are all such retries, new healthy SMS arriving later are queued ahead of the other retries but behind
-  those 32, each a failing probe 30 seconds apart: up to 16 minutes. Giving held messages back to RabbitMQ before a
-  probe, so it hands out the highest priority first, would close it; it was found at the end and left for later.
+- **Held retries are given back before a probe.** The consumer holds up to its prefetch count (32) of delivered
+  messages. If the breaker opened while they were all such retries, new healthy SMS arriving later were queued
+  behind those 32, each a failing probe 30 seconds apart: up to 16 minutes, found by a last manual check. Now, while
+  the breaker is half-open, a retry that was not delivered before (priority 0, not redelivered) is requeued once:
+  RabbitMQ hands out the highest priority first, so a fresh notification is the probe if one waits, and the retry
+  comes back redelivered and probes if none does (`TestBreakerProbesWithAFreshMessageBeforeARetry`).
 
 ### Deliberately not done
 

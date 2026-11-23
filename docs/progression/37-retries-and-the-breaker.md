@@ -1,7 +1,7 @@
 # 37. Retries and the breaker under load
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: 3103824, this follow-up's commit
 - ADR: [0036](../adr/0036-retries-and-the-breaker-under-load.md)
 
 ## Goal
@@ -23,7 +23,9 @@ opens on a failure ratio.
 
 delivery, dispatch, notification and cmd/worker green with `-race`; golangci-lint clean.
 
+5. A last manual check found held retries could still delay new healthy SMS up to 16 minutes while the breaker was
+   open; a held retry is now requeued once when the breaker half-opens, so a fresh notification is the probe.
+
 ## Follow-ups
 
-- Held messages can still delay new healthy traffic up to 16 minutes while the breaker is open (ADR 0036, "a limit
-  left"); found by a last manual check, left for later.
+- The held-retry fix is covered by a unit test, not yet by a repeated load run.
