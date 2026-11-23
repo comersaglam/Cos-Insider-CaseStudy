@@ -1,7 +1,7 @@
 # The whole service in one command (docs/adr/0010, 0019, 0025): `docker compose up` builds the image, starts
 # PostgreSQL, RabbitMQ and a stand-in provider, applies the migrations, then serves the API on
 # http://localhost:8080 and runs the worker, which sends to the stand-in unless PROVIDER_URL names a real provider,
-# such as a webhook.site URL.
+# such as a webhook.site URL. `--wait` returns once every service is healthy (ADR 0027).
 # Tests do not use this file; they start their own containers from the same images, which
 # internal/platform/testenv names and a test keeps equal to the tags below.
 
@@ -74,6 +74,14 @@ services:
     command: ["api"]
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
+    # Healthy once /readyz answers (ADR 0027); the image has no shell or curl, so the binary asks itself.
+    healthcheck:
+      test: ["CMD", "api", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -88,9 +96,16 @@ services:
       <<: *app-env
       AMQP_URL: amqp://${RABBITMQ_USER:-notifications}:${RABBITMQ_PASSWORD:-notifications}@rabbitmq:5672/
       PROVIDER_URL: ${PROVIDER_URL:-http://provider:8080/notify}
-    # The operations server: /metrics for Prometheus.
+    # The operations server: /metrics for Prometheus, /healthz and /readyz.
     ports:
       - "127.0.0.1:${WORKER_OPS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "worker", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       migrate:
         condition: service_completed_successfully

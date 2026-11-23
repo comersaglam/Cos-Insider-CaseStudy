@@ -123,6 +123,10 @@ func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *n
 	var once sync.Once
 	stop = func() {
 		once.Do(func() {
+			// The client may hold a connection it dialled and never used; a server waits five seconds before it counts
+			// such a connection idle, longer than the test's shutdown timeout allows. Closing it lets the server stop
+			// at once.
+			http.DefaultClient.CloseIdleConnections()
 			cancel()
 			select {
 			case err := <-done:
@@ -221,6 +225,22 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 		if !strings.Contains(string(body), series) {
 			t.Errorf("the worker's /metrics lacks %s", series)
 		}
+	}
+
+	probe, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ops+"/readyz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, err := http.DefaultClient.Do(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ready.Body.Close()
+	if ready.StatusCode != http.StatusOK {
+		t.Errorf("GET /readyz on the operations server = %d, want 200", ready.StatusCode)
+	}
+	if err := run(t.Context(), []string{"healthcheck"}, env(map[string]string{"OPS_ADDR": strings.TrimPrefix(ops, "http://")}), io.Discard); err != nil {
+		t.Errorf("worker healthcheck against the running worker = %v, want nil", err)
 	}
 }
 

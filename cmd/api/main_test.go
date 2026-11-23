@@ -6,6 +6,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,6 +28,19 @@ func TestRunRefusesAnUnknownCommand(t *testing.T) {
 	err := run(t.Context(), []string{"serv"}, env(nil), io.Discard)
 	if err == nil || !strings.Contains(err.Error(), `"serv"`) {
 		t.Errorf("run = %v, want an unknown command error", err)
+	}
+}
+
+// TestHealthcheckFailsWhenNothingServes: the health check needs no database setting, and fails when no API answers.
+func TestHealthcheckFailsWhenNothingServes(t *testing.T) {
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	if err := run(t.Context(), []string{"healthcheck"}, env(map[string]string{"HTTP_ADDR": addr}), io.Discard); err == nil {
+		t.Error("healthcheck with nothing listening = nil, want an error")
 	}
 }
 
@@ -75,6 +89,10 @@ func startAPI(t *testing.T) (base, dsn string) {
 		_ = logsW.Close()
 	}()
 	t.Cleanup(func() {
+		// The client may hold a connection it dialled and never used; a server waits five seconds before it counts
+		// such a connection idle, longer than the test's shutdown timeout allows. Closing it lets the server stop
+		// at once.
+		http.DefaultClient.CloseIdleConnections()
 		stop()
 		select {
 		case err := <-done:
@@ -183,6 +201,13 @@ func TestAPIEndToEnd(t *testing.T) {
 	waiting, _ := smsSummary["waiting"].(map[string]any)
 	if status != http.StatusOK || waiting["queued"] != float64(1) {
 		t.Errorf("GET /v1/metrics = %d, sms waiting %v; want the one queued notification", status, waiting)
+	}
+
+	if status, _, ready := call(t, http.MethodGet, base+"/readyz", "", nil); status != http.StatusOK || ready["status"] != "ready" {
+		t.Errorf("GET /readyz = %d %v, want ready", status, ready)
+	}
+	if err := run(t.Context(), []string{"healthcheck"}, env(map[string]string{"HTTP_ADDR": strings.TrimPrefix(base, "http://")}), io.Discard); err != nil {
+		t.Errorf("api healthcheck against the running API = %v, want nil", err)
 	}
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/metrics", nil)

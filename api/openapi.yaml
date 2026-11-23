@@ -268,6 +268,81 @@ paths:
         '500':
           $ref: '#/components/responses/Problem'
 
+  /healthz:
+    get:
+      operationId: getLiveness
+      summary: Whether the process runs
+      description: |
+        Answers 200 while the process runs, whatever the state of its dependencies, since restarting it would not
+        bring a database back (ADR 0027). For a liveness probe. The worker serves the same on its operations port
+        (9090). A successful call is logged at debug level only.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The process runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Whether the process can do its work
+      description: |
+        Checks every dependency at once, each within two seconds: PostgreSQL for the API; PostgreSQL and RabbitMQ for
+        the worker, on its operations port (9090). For a readiness probe; the containers' health checks run it
+        through `api healthcheck` and `worker healthcheck` (ADR 0027). Why a dependency failed is logged, never
+        answered, since the error can hold a host or a user name. A successful call is logged at debug level only.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: Every dependency answered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status: { type: string, const: ready }
+                  checks:
+                    type: object
+                    description: Each dependency checked, by name.
+                    additionalProperties: { type: string, const: ok }
+              example: { status: ready, checks: { postgres: ok } }
+        '503':
+          description: |
+            A dependency did not answer: `code` is `not_ready` and `detail` names the dependencies, such as
+            "postgres did not answer".
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /metrics:
+    get:
+      operationId: getPrometheusMetrics
+      summary: Metrics in Prometheus's text format
+      description: |
+        For Prometheus to scrape (ADR 0026): HTTP requests by method, route and status, their latency, and the Go
+        runtime's and the process's metrics. The worker serves its own on its operations port (9090): attempts,
+        provider latency, breaker state, queue depths and more. People read `GET /v1/metrics` instead. A successful
+        call is logged at debug level only.
+      responses:
+        '200':
+          description: The metrics.
+          content:
+            text/plain:
+              schema: { type: string }
+
   /v1/batches:
     post:
       operationId: createBatch

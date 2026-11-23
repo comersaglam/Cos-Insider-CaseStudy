@@ -171,6 +171,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ### 26. Health
 - `/healthz` (the process runs) and `/readyz` (PostgreSQL and RabbitMQ answer); Compose health checks use them.
+- **Decided** ([ADR 0027](adr/0027-health-probes.md)): the probes in `internal/health`; the worker's on its
+  operations server; `api healthcheck` and `worker healthcheck` for the distroless image; successful probes logged
+  at debug level.
 
 ### 27. Correlation across the queue
 - The request's correlation ID is stored on the notification, carried in an AMQP header, logged by the worker and

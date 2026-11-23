@@ -163,3 +163,43 @@ func TestRecorderKeepsFlushingAvailable(t *testing.T) {
 		t.Errorf("Flush through the recorder = %v, want nil", flushErr)
 	}
 }
+
+// TestAccessLogQuietsSuccessfulProbes: probes and scrapes come every few seconds; while they succeed they are logged
+// at debug level, and a failing one is logged as any other request.
+func TestAccessLogQuietsSuccessfulProbes(t *testing.T) {
+	tests := []struct {
+		name, path string
+		status     int
+		wantLevel  string // "" when nothing is logged at info level
+	}{
+		{"a successful probe", "/readyz", http.StatusOK, ""},
+		{"a failing probe", "/readyz", http.StatusServiceUnavailable, "ERROR"},
+		{"another path", "/v1/notifications", http.StatusOK, "INFO"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, level := range []slog.Level{slog.LevelInfo, slog.LevelDebug} {
+				var logs bytes.Buffer
+				h := AccessLog(observability.NewLogger(&logs, level), "/healthz", "/readyz")(
+					http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(tt.status) }))
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
+
+				want := tt.wantLevel
+				if want == "" && level == slog.LevelDebug {
+					want = "DEBUG"
+				}
+				got := ""
+				if logs.Len() > 0 {
+					var line map[string]any
+					if err := json.Unmarshal(logs.Bytes(), &line); err != nil {
+						t.Fatal(err)
+					}
+					got, _ = line["level"].(string)
+				}
+				if got != want {
+					t.Errorf("logged at %v: level %q, want %q", level, got, want)
+				}
+			}
+		})
+	}
+}

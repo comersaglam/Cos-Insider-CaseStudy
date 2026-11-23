@@ -5,6 +5,8 @@
 //	api            serve the API (the default)
 //	api serve      the same
 //	api migrate    apply the database migrations, then exit
+//	api healthcheck  ask the API serving on HTTP_ADDR whether it is ready; exit 0 if it is, 1 otherwise. The
+//	               container's health check runs it, the image having no shell or curl (ADR 0027).
 //
 // It is the composition root of the API process: it reads the configuration, builds the platform clients and the
 // modules, mounts them through httpapi and serves them until SIGINT or SIGTERM, then shuts down gracefully.
@@ -29,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/health"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/config"
@@ -37,6 +40,9 @@ import (
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/migrations"
 )
+
+// defaultAddr is where the API listens unless HTTP_ADDR says otherwise.
+const defaultAddr = ":8080"
 
 // defaultMaxBatchBody fits a full batch of the longest SMS or push messages (about 4 MB) or of e-mails averaging
 // 10 KB, while bounding the memory one request can take; larger e-mails go in smaller batches (ADR 0017).
@@ -60,13 +66,20 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	if len(args) > 0 {
 		command = args[0]
 	}
-	if command != "serve" && command != "migrate" {
-		return fmt.Errorf("unknown command %q; use serve or migrate", command)
+	if command != "serve" && command != "migrate" && command != "healthcheck" {
+		return fmt.Errorf("unknown command %q; use serve, migrate or healthcheck", command)
 	}
 
 	cfg := config.NewReader(lookup)
+	if command == "healthcheck" {
+		addr := cfg.String("HTTP_ADDR", defaultAddr)
+		if err := cfg.Err(); err != nil {
+			return fmt.Errorf("invalid configuration:\n%w", err)
+		}
+		return httpx.Probe(ctx, addr, "/readyz")
+	}
 	databaseURL := cfg.Secret("DATABASE_URL")
-	addr := cfg.String("HTTP_ADDR", ":8080")
+	addr := cfg.String("HTTP_ADDR", defaultAddr)
 	level := cfg.LogLevel("LOG_LEVEL", slog.LevelInfo)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
 	maxBatchBody := cfg.Int("BATCH_MAX_BODY_BYTES", defaultMaxBatchBody)
@@ -91,7 +104,8 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	}
 
 	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log, int64(maxBatchBody))
-	srv := httpx.NewServer(httpapi.NewRouter(log, observability.NewRegistry(), notifications), log)
+	probes := health.NewHandler(map[string]health.Check{"postgres": pool.Ping}, log)
+	srv := httpx.NewServer(httpapi.NewRouter(log, observability.NewRegistry(), probes, notifications), log)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)

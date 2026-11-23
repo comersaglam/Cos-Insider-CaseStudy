@@ -26,7 +26,7 @@ check: lint test ## Everything CI runs
 generate: ## Regenerate the typed query code from the SQL (sqlc)
 	sqlc generate
 
-up: ## Build and start the whole service (PostgreSQL, RabbitMQ, migrations, API on :8080)
+up: ## Build and start the whole service and wait until it is healthy (API on :8080, worker's metrics on :9090)
 	docker compose up --detach --build --wait
 
 deps: ## Start only PostgreSQL and RabbitMQ, for running the API from source (make api)

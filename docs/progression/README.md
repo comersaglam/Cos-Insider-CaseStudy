@@ -37,7 +37,8 @@ finds the commit that finished block NN.
 | [22](22-the-consumer.md) | Delivery: consumer, rate limit, sending and retry | 2026-11-23 | Claim, send, record and retry under a rate and a bound; the reaper; a deadlock in ADR 0009 found and fixed | `64d1b66` |
 | [23](23-circuit-breaker.md) | Circuit breaker and pausing the pull | 2026-11-23 | The consumer stops taking messages while the provider is down, spending no attempt | `65d6795` |
 | [24](24-worker.md) | Worker composition root and an end-to-end test | 2026-11-23 | `docker compose up` sends notifications end to end, to a stand-in or to webhook.site | `840d923` |
-| [25](25-metrics.md) | Metrics | 2026-11-23 | Prometheus `/metrics` on both processes, queue depth on scrape, a JSON summary for people | this block's commit |
+| [25](25-metrics.md) | Metrics | 2026-11-23 | Prometheus `/metrics` on both processes, queue depth on scrape, a JSON summary for people | `2fb8a8e` |
+| [26](26-health.md) | Health | 2026-11-23 | `/healthz` and `/readyz` on both processes; Compose waits until the service is ready | this block's commit |
 
 ## Template
 

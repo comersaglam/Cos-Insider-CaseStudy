@@ -34,6 +34,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0024](0024-circuit-breaker.md) | The circuit breaker | Accepted |
 | [0025](0025-worker-in-compose-and-the-provider-stand-in.md) | The worker in Compose, and a stand-in for the provider | Accepted |
 | [0026](0026-metrics.md) | Metrics: Prometheus for machines, a summary for people | Accepted |
+| [0027](0027-health-probes.md) | Health probes: liveness, readiness, and a health check without a shell | Accepted |
 
 ## Template
 

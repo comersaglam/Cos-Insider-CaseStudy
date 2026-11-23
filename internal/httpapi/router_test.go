@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"uuid"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/health"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 )
@@ -30,6 +32,9 @@ func (noNotifications) GetBatch(context.Context, uuid.UUID) (notification.Batch,
 	return notification.Batch{}, notification.ErrNotFound
 }
 
+// noProbes is a health handler with no dependency to check: always ready.
+func noProbes(log *slog.Logger) *health.Handler { return health.NewHandler(nil, log) }
+
 func TestRouter(t *testing.T) {
 	tests := []struct {
 		name, method, path string
@@ -45,7 +50,7 @@ func TestRouter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			log := observability.NewLogger(&logs, slog.LevelInfo)
-			h := NewRouter(log, observability.NewRegistry(), notification.NewHandler(noNotifications{}, log, 1<<20))
+			h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
 
 			r := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
 			r.Header.Set(observability.CorrelationHeader, "trace-me")
@@ -72,12 +77,41 @@ func TestRouter(t *testing.T) {
 
 func TestRouterServesMetrics(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	h := NewRouter(log, observability.NewRegistry(), notification.NewHandler(noNotifications{}, log, 1<<20))
+	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/unknown", nil))
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `notifications_http_requests_total{method="GET",route="unmatched",status="404"} 1`) {
 		t.Errorf("GET /metrics = %d, want the request just made counted:\n%.500s", rec.Code, rec.Body)
+	}
+}
+
+// TestRouterServesProbes: the probes are mounted, and a successful one stays out of the access log at info level.
+func TestRouterServesProbes(t *testing.T) {
+	var logs bytes.Buffer
+	log := observability.NewLogger(&logs, slog.LevelInfo)
+	down := health.NewHandler(map[string]health.Check{"postgres": func(context.Context) error { return errors.New("down") }}, log)
+	for _, tt := range []struct {
+		name   string
+		probes *health.Handler
+		path   string
+		status int
+		logged bool
+	}{
+		{"liveness", down, "/healthz", http.StatusOK, false},
+		{"readiness", noProbes(log), "/readyz", http.StatusOK, false},
+		{"failed readiness", down, "/readyz", http.StatusServiceUnavailable, true},
+	} {
+		logs.Reset()
+		h := NewRouter(log, observability.NewRegistry(), tt.probes, notification.NewHandler(noNotifications{}, log, 1<<20))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
+		if rec.Code != tt.status {
+			t.Errorf("%s: status %d, want %d", tt.name, rec.Code, tt.status)
+		}
+		if logged := strings.Contains(logs.String(), `"msg":"http request"`); logged != tt.logged {
+			t.Errorf("%s: access logged %v, want %v:\n%s", tt.name, logged, tt.logged, logs.String())
+		}
 	}
 }

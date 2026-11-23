@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
@@ -29,7 +30,10 @@ func Correlation(next http.Handler) http.Handler {
 
 // AccessLog logs one line per request: method, path, status, response size and duration. Server errors are
 // logged at error level, everything else at info. The query string is left out, since it may hold personal data.
-func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
+//
+// Requests to the quiet paths, probes and scrapes that come every few seconds, are logged at debug level while
+// they succeed, so they do not bury the requests that matter; one that fails is logged as any other.
+func AccessLog(log *slog.Logger, quiet ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -41,8 +45,11 @@ func AccessLog(log *slog.Logger) func(http.Handler) http.Handler {
 				status = http.StatusOK // net/http sends 200 when a handler writes nothing
 			}
 			level := slog.LevelInfo
-			if status >= http.StatusInternalServerError {
+			switch {
+			case status >= http.StatusInternalServerError:
 				level = slog.LevelError
+			case status < http.StatusBadRequest && slices.Contains(quiet, r.URL.Path):
+				level = slog.LevelDebug
 			}
 			log.LogAttrs(r.Context(), level, "http request",
 				slog.String("method", r.Method),

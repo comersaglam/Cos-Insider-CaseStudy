@@ -29,7 +29,7 @@ extension (`gopls`, format on save).
 | `make generate` | regenerates the typed query code from the SQL with `sqlc` |
 | `make build` | both binaries into `bin/` |
 | `make check` | `lint` and `test`, what CI runs |
-| `make up` | builds the image and starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`) |
+| `make up` | builds the image, starts everything (PostgreSQL, RabbitMQ, migrations, the API on `:8080`, the worker) and waits until it is healthy |
 | `make deps` | starts only PostgreSQL and RabbitMQ, for running the API from source |
 | `make down` | stops the local stack and keeps its data |
 | `make smoke` | creates and reads a notification through the running API (`scripts/smoke.sh`) |
@@ -52,6 +52,7 @@ Tests do not need it.
 | API (after `make up`) | <http://localhost:8080> | none |
 | Stand-in provider (WireMock), its received requests | <http://localhost:8081/__admin/requests> | none |
 | Metrics: API, worker, summary | <http://localhost:8080/metrics>, <http://localhost:9090/metrics>, <http://localhost:8080/v1/metrics> | none |
+| Probes: API, worker (`/healthz` the same) | <http://localhost:8080/readyz>, <http://localhost:9090/readyz> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.

@@ -1,7 +1,7 @@
 # 25. Metrics
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `2fb8a8e`
 - Decisions: [ADR 0026](../adr/0026-metrics.md)
 
 ## Goal

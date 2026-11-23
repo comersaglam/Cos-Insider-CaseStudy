@@ -5,6 +5,12 @@
 // PostgreSQL and RabbitMQ, declares the topology, and runs every loop under one errgroup until SIGINT or SIGTERM.
 // A loop that fails stops the others and the process; it is then restarted (crash-only).
 //
+// Usage:
+//
+//	worker              run the worker
+//	worker healthcheck  ask the worker's operations server on OPS_ADDR whether it is ready; exit 0 if it is, 1
+//	                    otherwise. The container's health check runs it, the image having no shell or curl (ADR 0027).
+//
 // Configuration, from the environment:
 //
 //	DATABASE_URL         PostgreSQL URL (required)
@@ -22,11 +28,12 @@
 //	RELAY_POLL_INTERVAL  the relay's fallback poll when no notification wakes it (default 5s)
 //	SCHEDULER_INTERVAL   how often due work is queued and lost work reaped (default 1s)
 //	SHUTDOWN_TIMEOUT     how long sends in flight may take to finish when stopping (default 15s)
-//	OPS_ADDR             where the operations server serves /metrics (default :9090)
+//	OPS_ADDR             where the operations server serves /metrics, /healthz and /readyz (default :9090)
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -42,6 +49,7 @@ import (
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/health"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/config"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/httpx"
@@ -56,6 +64,9 @@ const (
 	schedulerBatch = 1000
 )
 
+// defaultOpsAddr is where the operations server listens unless OPS_ADDR says otherwise.
+const defaultOpsAddr = ":9090"
+
 // leaseMargin is added to the provider timeout for a claim's lease, so a send always ends before its lease does
 // (ADR 0012).
 const leaseMargin = 30 * time.Second
@@ -69,6 +80,9 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// errRabbitMQClosed fails the readiness probe once the RabbitMQ connection is gone.
+var errRabbitMQClosed = errors.New("the RabbitMQ connection is closed")
 
 // topology is the service's exchanges and queues (ADR 0012): the direct exchange "notifications", a queue per
 // channel bound by the channel's name, and the dead-letter queue.
@@ -85,11 +99,18 @@ func topology() rabbitmq.Topology {
 // run is the whole program, with its inputs passed in so that tests can drive it. It returns nil once ctx ends and
 // every loop has stopped, and the first error otherwise.
 func run(ctx context.Context, args []string, lookup func(string) (string, bool), stdout io.Writer) error {
+	cfg := config.NewReader(lookup)
+	if len(args) == 1 && args[0] == "healthcheck" {
+		opsAddr := cfg.String("OPS_ADDR", defaultOpsAddr)
+		if err := cfg.Err(); err != nil {
+			return fmt.Errorf("invalid configuration:\n%w", err)
+		}
+		return httpx.Probe(ctx, opsAddr, "/readyz")
+	}
 	if len(args) > 0 {
-		return fmt.Errorf("unexpected arguments %q; the worker takes none", args)
+		return fmt.Errorf("unexpected arguments %q; the worker takes none, or healthcheck", args)
 	}
 
-	cfg := config.NewReader(lookup)
 	databaseURL := cfg.Secret("DATABASE_URL")
 	amqpURL := cfg.Secret("AMQP_URL")
 	// A webhook.site URL is a credential: whoever has it can read every request sent to it.
@@ -107,7 +128,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	pollInterval := cfg.Duration("RELAY_POLL_INTERVAL", 5*time.Second)
 	schedulerInterval := cfg.Duration("SCHEDULER_INTERVAL", time.Second)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
-	opsAddr := cfg.String("OPS_ADDR", ":9090")
+	opsAddr := cfg.String("OPS_ADDR", defaultOpsAddr)
 	if err := cfg.Err(); err != nil {
 		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
@@ -144,7 +165,8 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	defer func() { _ = pub.Close() }()
 	client := delivery.NewClient(providerURL, providerTimeout)
 
-	// The metrics (ADR 0026), served by the operations server; queue depths are read when Prometheus scrapes.
+	// The operations server: the metrics (ADR 0026), queue depths read when Prometheus scrapes, and the probes
+	// (ADR 0027). A lost RabbitMQ connection also stops the worker; until it does, the worker is not ready.
 	reg := observability.NewRegistry()
 	deliveryMetrics, dispatchMetrics := delivery.NewMetrics(reg), dispatch.NewMetrics(reg)
 	queues := []string{top.DeadLetter}
@@ -154,6 +176,15 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	reg.MustRegister(notification.NewWaitingCollector(store), rabbitmq.NewQueueDepthCollector(conn, queues))
 	ops := http.NewServeMux()
 	ops.Handle("GET /metrics", observability.MetricsHandler(reg))
+	health.NewHandler(map[string]health.Check{
+		"postgres": pool.Ping,
+		"rabbitmq": func(context.Context) error {
+			if conn.IsClosed() {
+				return errRabbitMQClosed
+			}
+			return nil
+		},
+	}, log).RegisterRoutes(ops)
 	opsListener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", opsAddr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", opsAddr, err)
