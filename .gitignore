@@ -1,0 +1,28 @@
+# Turkish working copies of tracked English docs: every docs/x.md may have a local docs/x.tr.md twin.
+*.tr.md
+*.tr.pdf
+
+# The assessment brief stays local; its requirements are restated in English in docs/requirements.md.
+docs/assessment/
+
+# Go build output and test artefacts
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Agent-local state
+.claude/settings.local.json
+CLAUDE.local.md
+.codebase-memory/
