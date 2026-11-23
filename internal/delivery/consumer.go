@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"runtime/debug"
 	"time"
 	"uuid"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
@@ -25,6 +27,13 @@ type store interface {
 	Claim(ctx context.Context, id uuid.UUID, lease time.Duration, maxAttempts int) (notification.Claim, error)
 	FinishAttempt(ctx context.Context, a notification.Attempt) error
 	MarkUnprocessable(ctx context.Context, id uuid.UUID) error
+	ReleaseClaim(ctx context.Context, id uuid.UUID, attempt int) error
+}
+
+// breaker guards the provider (ADR 0007, 0024); gobreaker's two-step breaker satisfies it.
+type breaker interface {
+	State() gobreaker.State
+	Allow() (done func(error), err error)
 }
 
 // sender makes one attempt to send a notification; *Client satisfies it.
@@ -44,7 +53,20 @@ type ConsumerConfig struct {
 	Policy RetryPolicy
 	// ShutdownTimeout bounds how long stopping waits for the sends in flight.
 	ShutdownTimeout time.Duration
+	// BreakerFailures transient failures in a row open the circuit breaker, for BreakerOpen (ADR 0007).
+	BreakerFailures int
+	BreakerOpen     time.Duration
 }
+
+// breakerRecheck is how often the loop looks at a breaker that is not closed, to resume once it lets a probe through.
+const breakerRecheck = 100 * time.Millisecond
+
+// errProviderFailing and errNotCounted are what a send reports to the breaker: a transient failure counts towards
+// opening it; a rejection or a rate limit says nothing of the provider's health and is not counted.
+var (
+	errProviderFailing = errors.New("the provider failed")
+	errNotCounted      = errors.New("an answer that says nothing of the provider's health")
+)
 
 // Consumer sends the notifications of one channel's queue, as its single active consumer (ADR 0005, 0009, 0012).
 // For each message it waits for the rate limiter and a free slot, then a goroutine of its own claims the
@@ -54,17 +76,31 @@ type Consumer struct {
 	store   store
 	send    sender
 	limiter *rate.Limiter
+	breaker breaker
 	cfg     ConsumerConfig
 	log     *slog.Logger
 }
 
 // NewConsumer returns a consumer over the given storage and sender. Its limiter has a burst of one, so sends are
 // spaced evenly and no second holds more than RatePerSecond of them, plus the one at its edge.
+//
+// Its circuit breaker opens after BreakerFailures transient failures in a row, stays open for BreakerOpen, then lets
+// one probe through: a success closes it, a failure opens it again.
 func NewConsumer(s store, snd sender, cfg ConsumerConfig, log *slog.Logger) *Consumer {
+	log = log.With("channel", cfg.Channel)
 	return &Consumer{
-		store: s, send: snd, cfg: cfg,
+		store: s, send: snd, cfg: cfg, log: log,
 		limiter: rate.NewLimiter(rate.Limit(cfg.RatePerSecond), 1),
-		log:     log.With("channel", cfg.Channel),
+		breaker: gobreaker.NewTwoStepCircuitBreaker[struct{}](gobreaker.Settings{
+			Name:        string(cfg.Channel),
+			MaxRequests: 1,
+			Timeout:     cfg.BreakerOpen,
+			ReadyToTrip: func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= uint32(cfg.BreakerFailures) }, //nolint:gosec // G115: a small positive setting
+			IsExcluded:  func(err error) bool { return errors.Is(err, errNotCounted) },
+			OnStateChange: func(_ string, from, to gobreaker.State) {
+				log.Warn("circuit breaker changed state", "from", from.String(), "to", to.String())
+			},
+		}),
 	}
 }
 
@@ -72,8 +108,9 @@ func NewConsumer(s store, snd sender, cfg ConsumerConfig, log *slog.Logger) *Con
 type action int
 
 const (
-	ack    action = iota // done with: sent, failed, waiting for a retry in PostgreSQL, or not there to be sent
-	reject               // dead-lettered: the message cannot be processed (ADR 0014)
+	ack     action = iota // done with: sent, failed, waiting for a retry in PostgreSQL, or not there to be sent
+	reject                // dead-lettered: the message cannot be processed (ADR 0014)
+	requeue               // put back unsent: the circuit breaker refused the send (ADR 0024)
 )
 
 // result is what a send hands back to the loop: the delivery, how to settle it, or the failure that stops the
@@ -99,13 +136,23 @@ func (c *Consumer) Run(ctx context.Context, deliveries <-chan amqp.Delivery) err
 	work := context.WithoutCancel(ctx)
 
 	for {
-		// A nil channel is never ready, so at full concurrency the select only waits for results.
+		// The breaker sets how many sends may be in flight: all while closed, the one probe while half-open, none
+		// while open, when the queue keeps the messages and no attempt is spent (ADR 0007). A nil channel is never
+		// ready, so at the limit the select waits only for results, and for the breaker to be looked at again.
+		limit, recheck := c.cfg.Concurrency, (<-chan time.Time)(nil)
+		switch c.breaker.State() {
+		case gobreaker.StateOpen:
+			limit, recheck = 0, time.After(breakerRecheck)
+		case gobreaker.StateHalfOpen:
+			limit, recheck = 1, time.After(breakerRecheck)
+		}
 		var incoming <-chan amqp.Delivery
-		if inFlight < c.cfg.Concurrency {
+		if inFlight < limit {
 			incoming = deliveries
 		}
 
 		select {
+		case <-recheck:
 		case r := <-results:
 			inFlight--
 			if err := c.settle(r); err != nil {
@@ -154,6 +201,8 @@ func (c *Consumer) settle(r result) error {
 		err = r.d.Ack(false)
 	case reject:
 		err = r.d.Reject(false)
+	case requeue:
+		err = r.d.Nack(false, true)
 	}
 	if err != nil {
 		return fmt.Errorf("settle delivery %s: %w", r.d.MessageId, err)
@@ -188,7 +237,17 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
 			"notification_id", n.ID, "attempt", n.Attempts)
 	}
 
+	// The breaker is asked after the claim, so a message with nothing to send never counts as a probe. If it
+	// opened meanwhile, the claim is undone, attempt included, and the message goes back to the queue.
+	done, err := c.breaker.Allow()
+	if err != nil {
+		if err := c.store.ReleaseClaim(ctx, n.ID, n.Attempts); err != nil {
+			return result{d: d, err: fmt.Errorf("release the claim on %s: %w", n.ID, err)}
+		}
+		return result{d: d, action: requeue}
+	}
 	out := c.sendSafely(ctx, n)
+	done(breakerReport(out))
 	attempt := c.cfg.Policy.After(n.ID, n.Attempts, out, time.Now())
 	switch err := c.store.FinishAttempt(ctx, attempt); {
 	case errors.Is(err, notification.ErrClaimLost):
@@ -239,4 +298,16 @@ func (c *Consumer) logAttempt(ctx context.Context, n notification.Notification, 
 	c.log.Log(ctx, level, "attempt finished",
 		"notification_id", n.ID, "attempt", a.Number, "outcome", a.Outcome, "status_code", a.StatusCode,
 		"next", a.Next, "latency_ms", out.Latency.Milliseconds(), "to", observability.MaskRecipient(n.To), "error", a.Error)
+}
+
+// breakerReport is what an outcome tells the breaker: a transient failure counts towards opening it, a success
+// towards closing it, and a rejection or a rate limit, which are no sign of an outage, nothing (ADR 0007).
+func breakerReport(out Outcome) error {
+	switch {
+	case out.Class == Success:
+		return nil
+	case out.Class == Transient && out.StatusCode != http.StatusTooManyRequests:
+		return errProviderFailing
+	}
+	return errNotCounted
 }

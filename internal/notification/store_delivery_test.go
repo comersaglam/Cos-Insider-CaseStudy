@@ -259,3 +259,26 @@ func TestRetryGivesBackEveryAttempt(t *testing.T) {
 		t.Errorf("Retry = attempts %d reason %q, %v; want a fresh budget", got.Attempts, got.FailureReason, err)
 	}
 }
+
+// TestReleaseClaimGivesBackTheAttempt: a claim the circuit breaker stopped before the send is undone, attempt
+// included, so the notification waits as if it had not been taken (ADR 0024).
+func TestReleaseClaimGivesBackTheAttempt(t *testing.T) {
+	t.Parallel()
+	store, _ := newTestStore(t)
+	n := mustCreate(t, store, newQueued(testDraft))
+	c, err := store.Claim(t.Context(), n.ID, testLease, testMaxAttempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReleaseClaim(t.Context(), n.ID, c.Notification.Attempts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(t.Context(), n.ID)
+	if err != nil || got.Status != StatusQueued || got.Attempts != 0 {
+		t.Errorf("after release = %s with %d attempts, %v; want queued with none spent", got.Status, got.Attempts, err)
+	}
+	// A release that comes too late, after the claim changed hands, changes nothing.
+	if err := store.ReleaseClaim(t.Context(), n.ID, 1); err != nil {
+		t.Errorf("a stale release = %v, want nil", err)
+	}
+}

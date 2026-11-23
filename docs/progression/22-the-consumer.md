@@ -1,7 +1,7 @@
 # 22. Delivery: consumer, rate limit, sending and retry
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `64d1b66`
 - Decisions: [ADR 0023](../adr/0023-the-consumer.md), amending [ADR 0009](../adr/0009-concurrency-model.md);
   applying ADR 0005, 0007, 0012 and 0014
 

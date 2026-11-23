@@ -145,6 +145,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Scope**: `sony/gobreaker` per channel; while open the consumer takes no deliveries; half-open probe.
 - **Tests**: five 503s open the breaker, no request is sent, no attempt is spent; when the provider recovers the flow
   resumes.
+- **Decided** ([ADR 0024](adr/0024-circuit-breaker.md)): gobreaker's two-step breaker asked after the claim; a
+  refused claim is released, attempt given back, and the message requeued; `429` and rejections are excluded.
 
 ### 24. Worker composition root and an end-to-end test
 - **Scope**: `cmd/worker` starts every goroutine under one `errgroup`, shuts down in order, and serves `/metrics` and

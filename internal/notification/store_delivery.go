@@ -81,6 +81,15 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt) error {
 	return nil
 }
 
+// ReleaseClaim undoes a claim whose send never started, when the circuit breaker refused it: the notification is
+// queued again and the attempt given back (ADR 0024). A claim that has changed hands is left alone.
+func (s *Store) ReleaseClaim(ctx context.Context, id uuid.UUID, attempt int) error {
+	if err := db.New(s.pool).ReleaseClaim(ctx, db.ReleaseClaimParams{ID: id, Attempt: attempt}); err != nil {
+		return fmt.Errorf("release claim: %w", err)
+	}
+	return nil
+}
+
 // MarkUnprocessable fails a queued notification whose message cannot be processed (ADR 0014). A notification in
 // any other status is left as it is.
 func (s *Store) MarkUnprocessable(ctx context.Context, id uuid.UUID) error {

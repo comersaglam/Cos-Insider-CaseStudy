@@ -34,6 +34,7 @@ func TestStatusCanTransitionTo(t *testing.T) {
 		{StatusSending, StatusSent}:        true,
 		{StatusSending, StatusRetrying}:    true, // a transient failure with attempts left
 		{StatusSending, StatusFailed}:      true, // a permanent failure, or no attempts left
+		{StatusSending, StatusQueued}:      true, // the claim released, unsent, when the circuit breaker opened
 		{StatusRetrying, StatusQueued}:     true, // the scheduler finds the retry due
 		{StatusRetrying, StatusCancelled}:  true,
 		{StatusFailed, StatusQueued}:       true, // the retry endpoint
@@ -54,7 +55,7 @@ func TestStatusesThatCanBecome(t *testing.T) {
 		want   []Status
 	}{
 		{StatusCancelled, []Status{StatusScheduled, StatusQueued, StatusRetrying}},
-		{StatusQueued, []Status{StatusScheduled, StatusRetrying, StatusFailed}},
+		{StatusQueued, []Status{StatusScheduled, StatusSending, StatusRetrying, StatusFailed}},
 		{StatusScheduled, nil},
 	}
 	for _, tt := range tests {

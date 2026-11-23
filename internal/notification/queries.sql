@@ -193,3 +193,9 @@ WHERE n.id = expired.id;
 
 -- name: ListDeliveryAttempts :many
 SELECT * FROM delivery_attempts WHERE notification_id = @notification_id ORDER BY attempt, id;
+
+-- name: ReleaseClaim :exec
+-- Undoes a claim whose send never started, giving back its attempt, if the claim is still the one that took it.
+UPDATE notifications
+SET status = 'queued', claimed_until = NULL, attempts = attempts - 1, updated_at = now()
+WHERE id = @id AND status = 'sending' AND attempts = @attempt;

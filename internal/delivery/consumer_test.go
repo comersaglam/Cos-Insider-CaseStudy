@@ -20,6 +20,7 @@ type acks struct {
 	mu       sync.Mutex
 	acked    []uint64
 	rejected []uint64
+	requeued []uint64
 }
 
 func (a *acks) Ack(tag uint64, _ bool) error {
@@ -29,7 +30,15 @@ func (a *acks) Ack(tag uint64, _ bool) error {
 	return nil
 }
 
-func (a *acks) Nack(uint64, bool, bool) error { return errors.New("the consumer never nacks") }
+func (a *acks) Nack(tag uint64, _, requeue bool) error {
+	if !requeue {
+		return errors.New("the consumer rejects rather than nacks without requeueing")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.requeued = append(a.requeued, tag)
+	return nil
+}
 
 func (a *acks) Reject(tag uint64, _ bool) error {
 	a.mu.Lock()
@@ -38,10 +47,11 @@ func (a *acks) Reject(tag uint64, _ bool) error {
 	return nil
 }
 
+// counts returns how many deliveries were acknowledged, and how many rejected or requeued.
 func (a *acks) counts() (int, int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return len(a.acked), len(a.rejected)
+	return len(a.acked), len(a.rejected) + len(a.requeued)
 }
 
 // fakeStore answers claims and records outcomes.
@@ -52,7 +62,15 @@ type fakeStore struct {
 	takenOver    bool
 	finished     []notification.Attempt
 	unprocessed  []uuid.UUID
+	released     []uuid.UUID
 	claimedTimes int
+}
+
+func (f *fakeStore) ReleaseClaim(_ context.Context, id uuid.UUID, _ int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.released = append(f.released, id)
+	return nil
 }
 
 func (f *fakeStore) Claim(_ context.Context, id uuid.UUID, _ time.Duration, _ int) (notification.Claim, error) {
@@ -97,7 +115,7 @@ func (s fakeSender) Send(context.Context, notification.Notification) Outcome {
 func testConfig() ConsumerConfig {
 	return ConsumerConfig{
 		Channel: notification.ChannelSMS, Concurrency: 4, RatePerSecond: 1000, Lease: time.Minute,
-		Policy: testPolicy, ShutdownTimeout: 5 * time.Second,
+		Policy: testPolicy, ShutdownTimeout: 5 * time.Second, BreakerFailures: 5, BreakerOpen: time.Minute,
 	}
 }
 

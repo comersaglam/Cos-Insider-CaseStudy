@@ -34,7 +34,7 @@ var lifecycle = []Status{
 var transitions = map[Status][]Status{
 	StatusScheduled: {StatusQueued, StatusCancelled},
 	StatusQueued:    {StatusSending, StatusCancelled, StatusFailed},
-	StatusSending:   {StatusSent, StatusRetrying, StatusFailed},
+	StatusSending:   {StatusSent, StatusRetrying, StatusFailed, StatusQueued},
 	StatusRetrying:  {StatusQueued, StatusCancelled},
 	StatusFailed:    {StatusQueued},
 	StatusSent:      nil,

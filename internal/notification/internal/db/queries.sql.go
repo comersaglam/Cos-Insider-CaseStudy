@@ -717,6 +717,23 @@ func (q *Queries) ReapExpiredClaims(ctx context.Context, arg ReapExpiredClaimsPa
 	return result.RowsAffected(), nil
 }
 
+const releaseClaim = `-- name: ReleaseClaim :exec
+UPDATE notifications
+SET status = 'queued', claimed_until = NULL, attempts = attempts - 1, updated_at = now()
+WHERE id = $1 AND status = 'sending' AND attempts = $2
+`
+
+type ReleaseClaimParams struct {
+	ID      uuid.UUID
+	Attempt int
+}
+
+// Undoes a claim whose send never started, giving back its attempt, if the claim is still the one that took it.
+func (q *Queries) ReleaseClaim(ctx context.Context, arg ReleaseClaimParams) error {
+	_, err := q.db.Exec(ctx, releaseClaim, arg.ID, arg.Attempt)
+	return err
+}
+
 const requeueFailedNotification = `-- name: RequeueFailedNotification :one
 UPDATE notifications
 SET status = 'queued', failed_at = NULL, failure_reason = NULL, attempts = 0, updated_at = now()
