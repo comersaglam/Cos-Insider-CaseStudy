@@ -27,6 +27,7 @@ func TestStatusCanTransitionTo(t *testing.T) {
 		{StatusScheduled, StatusCancelled}: true,
 		{StatusQueued, StatusSending}:      true, // a worker claims it
 		{StatusQueued, StatusCancelled}:    true,
+		{StatusQueued, StatusFailed}:       true, // its message could not be processed at all
 		{StatusSending, StatusSent}:        true,
 		{StatusSending, StatusRetrying}:    true, // a transient failure with attempts left
 		{StatusSending, StatusFailed}:      true, // a permanent failure, or no attempts left

@@ -38,8 +38,13 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Decided** ([ADR 0013](adr/0013-platform-conventions.md)): configuration with the standard library, every
   problem reported at once; `X-Correlation-ID`; problem `errors` located by JSON Pointer; `encoding/json/v2`.
 
-### 13. Database and store
-- **Scope**: migrations (`notifications` with `attempts` and `claimed_until`, `batches`, `outbox`,
+### 13. Dead letters and replay
+- **Scope**: bulk replay by filter, and marking a notification `failed` when its message cannot be processed
+  ([ADR 0014](adr/0014-dead-letters-and-replay.md)); the transition `queued` → `failed` in the domain.
+- **Tests**: `TestStatusCanTransitionTo` gains the new transition.
+
+### 14. Database and store
+- **Scope**: migrations (`notifications` with `attempts`, `claimed_until` and a failure reason, `batches`, `outbox`,
   `delivery_attempts`, the idempotency index);
   `platform/postgres` (pool, transaction helper, migration runner); `sqlc.yaml`; the testcontainers helper in
   `platform/testenv`, starting `testenv.PostgresImage`; the notification store.
@@ -48,28 +53,30 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   as partial indexes); `timestamptz`; `NOT NULL` matches the domain.
 - **Open question**: the idempotency key's scope and lifetime; the same key with a different body (422?).
 
-### 14. Create, get, and a running API
+### 15. Create, get, and a running API
 - **Scope**: `POST /v1/notifications`, `GET /v1/notifications/{id}`; service; handlers; the `httpapi` router; the
   `cmd/api` composition root; graceful shutdown; notification and outbox rows in one transaction.
 - **Tests**: handlers with a fake service; the service with a fake store; end to end with a real database; two
   requests with one `Idempotency-Key` make one notification; a request in progress completes during shutdown.
 - **Watch**: server timeouts; `202 Accepted` rather than `201`, since the notification is accepted, not sent.
 
-### 15. Batch create and batch status
+### 16. Batch create and batch status
 - **Scope**: `POST /v1/notifications/batch` (up to 1000), `GET /v1/batches/{id}` with counts per status.
 - **Tests**: 1000 accepted, 1001 refused; behaviour with invalid items; all rows in one transaction.
 - **Watch**: `COPY` through pgx `CopyFrom` for notifications and outbox rows.
 - **Open question**: one invalid item refuses the whole batch (atomic), or valid items are accepted and invalid
   ones reported (partial); the body size limit, since 1000 e-mails of 100,000 characters could reach 400 MB.
 
-### 16. List, cancel and retry
+### 17. List, cancel and retry
 - **Scope**: `GET /v1/notifications` with status, channel, date range and batch filters and keyset cursors;
   `POST /v1/notifications/{id}/cancel` (only while waiting, otherwise 409);
-  `POST /v1/notifications/{id}/retry` (only when `failed`).
-- **Tests**: filter combinations; no row lost or repeated across pages when timestamps tie; cancel racing a send.
+  `POST /v1/notifications/{id}/retry` (only when `failed`); `POST /v1/notifications/retry`, the bulk replay by
+  channel, batch and a required time window, with `dryRun` and a cap per request ([ADR 0014](adr/0014-dead-letters-and-replay.md)).
+- **Tests**: filter combinations; no row lost or repeated across pages when timestamps tie; cancel racing a send;
+  bulk replay requeues only `failed` rows inside the window, `dryRun` changes nothing, the cap holds.
 - **Watch**: cancel is one conditional `UPDATE`, so the database settles the race; cursors are opaque.
 
-### 17. One-command stack
+### 18. One-command stack
 - **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate`, `api` and `worker`
   services added to `compose.yaml` next to the dependencies from block 09; `depends_on` conditions on health;
   `make migrate`.
@@ -78,14 +85,14 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ## Phase 2: the processing engine
 
-### 18. Platform: RabbitMQ
+### 19. Platform: RabbitMQ
 - **Scope**: connection; topology (the direct exchange `notifications`, one durable queue per channel bound by its
   name, with `x-max-priority`, single active consumer and a dead-letter exchange); publishing with confirms
   ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
 - **Tests** (RabbitMQ through testcontainers): topology declaration is idempotent; an unconfirmed publish fails;
   priority order; a second consumer receives nothing under single active consumer.
 
-### 19. Dispatch: outbox relay and scheduler
+### 20. Dispatch: outbox relay and scheduler
 - **Scope**: the relay takes unpublished outbox rows with `SKIP LOCKED`, publishes and marks them after the confirm,
   woken by `LISTEN/NOTIFY` with a ticker as fallback; the scheduler moves due `scheduled` and `retrying` rows to the
   outbox, and its reaper moves `sending` rows with an expired lease to `retrying` or `failed`.
@@ -95,28 +102,29 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Watch**: batch size; publication in priority order; the relay is at least once (a crash after the confirm
   republishes, which consumer idempotency absorbs).
 
-### 20. Delivery: provider client
+### 21. Delivery: provider client
 - **Scope**: the webhook.site client (`to`, `channel`, `content`), timeout, `Idempotency-Key` and correlation
   headers, classification of outcomes ([ADR 0007](adr/0007-delivery-and-retry.md)), `Retry-After`.
 - **Tests**: an `httptest.Server` for every status code, a timeout, malformed JSON, an oversized body.
 
-### 21. Delivery: consumer, rate limit, sending and retry
+### 22. Delivery: consumer, rate limit, sending and retry
 - **Scope**: per-channel consumer under single active consumer; `x/time/rate` limiter; one goroutine per message
   bounded by a semaphore of `SEND_CONCURRENCY` ([ADR 0009](adr/0009-concurrency-model.md)); the claim before sending
   with a lease, spending an attempt (ADR 0012); outcome as an attempt row, a status update and an acknowledgement
-  sent by the consumer; retries with full jitter; unreadable messages to the dead-letter queue; a panic in a sender
+  sent by the consumer; retries with full jitter; unreadable messages to the dead-letter queue, their notification
+  marked `failed` (`unprocessable_message`) when its ID can be read; a panic in a sender
   recovered as a failed attempt.
 - **Tests**: 500 messages never exceed about 100 per second; a cancelled message is not sent; two copies of one
   message in flight at once send once; an expired lease is claimed again and counted as a possible duplicate;
   a message that panics ends in `failed` after its attempts; backoff bounds; the deadlock guard (a full semaphore
   with pending results); `-race`.
 
-### 22. Circuit breaker and pausing the pull
+### 23. Circuit breaker and pausing the pull
 - **Scope**: `sony/gobreaker` per channel; while open the consumer takes no deliveries; half-open probe.
 - **Tests**: five 503s open the breaker, no request is sent, no attempt is spent; when the provider recovers the flow
   resumes.
 
-### 23. Worker composition root and an end-to-end test
+### 24. Worker composition root and an end-to-end test
 - **Scope**: `cmd/worker` starts every goroutine under one `errgroup`, shuts down in order, and serves `/metrics` and
   `/healthz`.
 - **Tests**: end to end: API → PostgreSQL → relay → RabbitMQ → consumer → fake provider → `sent`; shutdown with
@@ -124,51 +132,52 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ## Phase 3: observability
 
-### 24. Metrics
+### 25. Metrics
 - **Scope**: HTTP request counts and latency histograms; sends per channel and outcome; provider latency; queue
-  depth (waiting rows per status in PostgreSQL, ready messages in RabbitMQ) collected on scrape; breaker state;
+  depth (waiting rows per status in PostgreSQL, ready messages in RabbitMQ, the dead-letter queue's depth)
+  collected on scrape; breaker state;
   rate-limiter wait.
 - **Watch**: label cardinality (a notification ID is never a label).
 - **Open question**: Prometheus `/metrics` alone, or also a JSON summary endpoint for people; Grafana in Compose.
 
-### 25. Health
+### 26. Health
 - `/healthz` (the process runs) and `/readyz` (PostgreSQL and RabbitMQ answer); Compose health checks use them.
 
-### 26. Correlation across the queue
+### 27. Correlation across the queue
 - The request's correlation ID is stored on the notification, carried in an AMQP header, logged by the worker and
   sent to the provider.
 - **Test**: one ID links the API's and the worker's log lines.
 
 ## Phase 4: deliverables
 
-### 27. OpenAPI and Swagger UI
+### 28. OpenAPI and Swagger UI
 - `api/openapi.yaml` (3.1) served with Swagger UI at `/docs`; a test checks every registered route is in the spec
   and the spec is valid.
 - **Open question**: written by hand (design first) or generated from code.
 
-### 28. README
+### 29. README
 - Setup, architecture diagram (Mermaid), curl examples, a summary of the decisions linking the ADRs, and what is
   deliberately out of scope.
 
-### 29. CI (GitHub Actions)
+### 30. CI (GitHub Actions)
 - Lint, `test -race`, `govulncheck`, a check that generated `sqlc` code is current, Docker build.
 
 ## Phase 5: bonus features
 
 | # | Bonus | Note |
 |---|---|---|
-| 30 | Scheduled notifications | The mechanism exists ([ADR 0006](adr/0006-delayed-work-waits-in-postgresql.md)); a `scheduledAt` field, its validation and cancellation. |
-| 31 | Templates | `text/template`; a templates table with CRUD; a missing variable is an error. |
-| 32 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. |
-| 33 | Distributed tracing | OpenTelemetry propagated over HTTP and AMQP headers; Jaeger in Compose. |
-| 34 | Load and burst test | A script and results in the README showing the rate limit and priorities at work. |
+| 31 | Scheduled notifications | The mechanism exists ([ADR 0006](adr/0006-delayed-work-waits-in-postgresql.md)); a `scheduledAt` field, its validation and cancellation. |
+| 32 | Templates | `text/template`; a templates table with CRUD; a missing variable is an error. |
+| 33 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. |
+| 34 | Distributed tracing | OpenTelemetry propagated over HTTP and AMQP headers; Jaeger in Compose. |
+| 35 | Load and burst test | A script and results in the README showing the rate limit and priorities at work. |
 
 Failure handling is covered by retries, the circuit breaker, the dead-letter queue and the retry endpoint (blocks
-16, 21, 22); CI/CD by block 29.
+13, 17, 22, 23); CI/CD by block 30.
 
 ## Phase 6: closing
 
-### 35. Final review
+### 36. Final review
 - An independent code review, the README tried on a clean machine, the commit history checked, progression and
   ADRs current.
 
@@ -186,4 +195,6 @@ Recorded so the first version stays small; each would get its own ADR.
   queue and PostgreSQL absorb bursts, which is what the asynchronous design is for; backpressure inside the
   system comes from the prefetch count, the semaphore, the rate limiter, the breaker and RabbitMQ's publisher
   blocking ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
+- **Reconciling lost messages**: a command that republishes `queued` notifications whose messages a single
+  RabbitMQ node lost with its disk ([ADR 0014](adr/0014-dead-letters-and-replay.md)).
 - **Quorum queues** for a multi-node RabbitMQ cluster, from [ADR 0003](adr/0003-postgresql-and-rabbitmq-with-outbox.md).

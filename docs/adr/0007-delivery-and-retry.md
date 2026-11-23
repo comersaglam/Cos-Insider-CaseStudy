@@ -1,6 +1,6 @@
 # 0007. Delivery and retry
 
-- Status: Accepted
+- Status: Accepted; amended by [0014](0014-dead-letters-and-replay.md) (bulk replay)
 - Date: 2026-11-23
 
 ## Context

@@ -1,7 +1,7 @@
 # 12. Platform: config, observability, httpx
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `8080430`
 - Decisions: [ADR 0013](../adr/0013-platform-conventions.md)
 
 ## Goal
@@ -35,6 +35,5 @@ same way.
 
 ## Follow-ups
 
-Block 13, the database and store: migrations (with `attempts` and `claimed_until`), the PostgreSQL pool, sqlc,
-the testcontainers helper and the notification store; the notification's ID type is chosen there, now that the
-standard library has a `uuid` package.
+Block 13 settles dead letters and replay; the database and store follow as block 14, where the notification's ID
+type is chosen, now that the standard library has a `uuid` package.

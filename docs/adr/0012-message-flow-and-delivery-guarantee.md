@@ -129,3 +129,4 @@ dropped. The reaper and a redelivered claim race on the same conditional `UPDATE
 | Acknowledging before sending (at most once) | A crash loses the notification silently. |
 | Quorum queues for their delivery limit | They support two priority levels rather than three, and the attempt counter covers crash loops already ([0003](0003-postgresql-and-rabbitmq-with-outbox.md)). |
 | A fanout exchange for status events | No component needs them; WebSocket updates use `LISTEN/NOTIFY`. |
+| Admission control at the API (`429` or `503` above a backlog threshold) | Absorbing bursts is what the queue and PostgreSQL are for; backpressure inside the system comes from the prefetch count, the semaphore, the rate limiter, the breaker, and RabbitMQ blocking publishers when its memory or disk runs low, while the outbox holds the rest. Recorded as later work. |

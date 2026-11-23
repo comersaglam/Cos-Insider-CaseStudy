@@ -18,7 +18,8 @@ const (
 	StatusRetrying Status = "retrying"
 	// StatusSent was accepted by the provider. It is final.
 	StatusSent Status = "sent"
-	// StatusFailed failed permanently or ran out of attempts; only the retry endpoint moves it on.
+	// StatusFailed failed permanently, ran out of attempts, or had a message that could not be processed; only
+	// the retry endpoints move it on.
 	StatusFailed Status = "failed"
 	// StatusCancelled was cancelled while it waited. It is final.
 	StatusCancelled Status = "cancelled"
@@ -27,7 +28,7 @@ const (
 // transitions lists, for every status, the statuses it may move to.
 var transitions = map[Status][]Status{
 	StatusScheduled: {StatusQueued, StatusCancelled},
-	StatusQueued:    {StatusSending, StatusCancelled},
+	StatusQueued:    {StatusSending, StatusCancelled, StatusFailed},
 	StatusSending:   {StatusSent, StatusRetrying, StatusFailed},
 	StatusRetrying:  {StatusQueued, StatusCancelled},
 	StatusFailed:    {StatusQueued},
