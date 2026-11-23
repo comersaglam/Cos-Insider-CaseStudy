@@ -53,6 +53,7 @@ Tests do not need it.
 | Stand-in provider (WireMock), its received requests | <http://localhost:8081/__admin/requests> | none |
 | Metrics: API, worker, summary | <http://localhost:8080/metrics>, <http://localhost:9090/metrics>, <http://localhost:8080/v1/metrics> | none |
 | Probes: API, worker (`/healthz` the same) | <http://localhost:8080/readyz>, <http://localhost:9090/readyz> | none |
+| The contract, rendered by Swagger UI, and as YAML | <http://localhost:8080/docs>, <http://localhost:8080/openapi.yaml> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.
@@ -64,7 +65,21 @@ Tests do not need it.
 - To try the API: `make up` and `make smoke`. To work on it from source: `make deps`, `make migrate`, `make api`,
   then
   `curl -i -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' -d '{"to":"+905551234567","channel":"sms","content":"Hello"}'`.
-  The contract is [api/openapi.yaml](../api/openapi.yaml).
+  The contract is [api/openapi.yaml](../api/openapi.yaml), rendered at <http://localhost:8080/docs>.
+
+## Changing the contract
+
+- `api/openapi.yaml` changes in the same commit as the behaviour. Tests check it
+  ([ADR 0029](adr/0029-contract-tests-and-documentation-page.md)): it must be valid OpenAPI 3.1 with examples that
+  match their schemas (`make test PKG=./api/...`), every route the router registers must be an operation and the
+  other way round (`internal/httpapi`), and every answer the handler and end-to-end tests see must have a status
+  and a body the contract documents. A new error code is added to `Problem.code` and to the table in the
+  introduction.
+- Examples are real answers: copy them from the running stack (`make up`, then `curl -i`).
+- To move Swagger UI to another version, change the version in both URLs of `internal/httpapi/docs.html` and both
+  `integrity` hashes, computed from npm's published files after checking that jsDelivr serves the same bytes:
+  `curl -s https://cdn.jsdelivr.net/npm/swagger-ui-dist@<version>/swagger-ui-bundle.js | openssl dgst -sha384 -binary | openssl base64 -A`
+  (and the same for `swagger-ui.css`); the router test checks them.
 
 ## Where code goes
 
@@ -76,7 +91,7 @@ Tests do not need it.
 | `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`, and `testenv` for integration tests); its conventions are [ADR 0013](adr/0013-platform-conventions.md) |
 | `migrations` | versioned SQL migrations (golang-migrate files), embedded in the binaries; each block adds the tables and columns it uses |
 | `internal/<module>/queries.sql`, `internal/<module>/internal/db` | a module's SQL and the code `sqlc` generates from it, reachable only from that module |
-| `api/openapi.yaml` | the API contract |
+| `api/openapi.yaml`, `api/contract` | the API contract, embedded by package `api`; `api/contract` checks answers against it in tests |
 | `compose.yaml`, `Dockerfile` | the local stack and the application's image, at the root where Docker looks for them; `deploy/` only for configuration files mounted into containers |
 
 ## Go practices this codebase relies on

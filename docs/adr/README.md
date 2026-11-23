@@ -36,6 +36,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0026](0026-metrics.md) | Metrics: Prometheus for machines, a summary for people | Accepted |
 | [0027](0027-health-probes.md) | Health probes: liveness, readiness, and a health check without a shell | Accepted |
 | [0028](0028-correlation-across-the-queue.md) | Correlation across the queue | Accepted |
+| [0029](0029-contract-tests-and-documentation-page.md) | Contract tests and the documentation page | Accepted |
 
 ## Template
 

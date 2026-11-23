@@ -1,7 +1,7 @@
 # 27. Correlation across the queue
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `30f26c2`
 - Decisions: [ADR 0028](../adr/0028-correlation-across-the-queue.md)
 
 ## Goal

@@ -27,6 +27,16 @@ linters:
               desc: it starts test containers; only tests import it (ADR 0015)
             - pkg: github.com/testcontainers/testcontainers-go
               desc: test containers belong in tests, through internal/platform/testenv (ADR 0015)
+        contract-only-in-tests:
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/api/contract/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/api/contract
+              desc: it checks answers against the contract in tests; only tests import it (ADR 0029)
+            - pkg: github.com/getkin/kin-openapi
+              desc: the contract is checked in tests, through api/contract (ADR 0029)
         platform-imports-no-module:
           files:
             - "**/internal/platform/**"

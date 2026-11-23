@@ -68,7 +68,8 @@ who decided something or when.
 ## API
 
 - Paths are kebab-case and versioned (`/v1/...`); JSON fields are camelCase, matching the provider contract.
-- `api/openapi.yaml` is the contract. A test checks that every route the server registers is in it.
+- `api/openapi.yaml` is the contract. Tests check that the server's routes and the contract's operations are the
+  same, and every answer the handler and end-to-end tests see against it ([ADR 0029](docs/adr/0029-contract-tests-and-documentation-page.md)).
 - Lists use keyset (cursor) pagination ordered by `(created_at, id)`.
 
 ## Tests

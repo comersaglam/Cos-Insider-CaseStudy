@@ -34,7 +34,7 @@ func NewHandler(checks map[string]Check, log *slog.Logger) *Handler {
 }
 
 // RegisterRoutes mounts GET /healthz and GET /readyz on mux.
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux httpx.Mux) {
 	mux.Handle("GET /healthz", httpx.Handle(h.log, h.live))
 	mux.Handle("GET /readyz", httpx.Handle(h.log, h.ready))
 }

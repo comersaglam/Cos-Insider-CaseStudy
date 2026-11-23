@@ -191,6 +191,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Detailed, as the owner asked**: every operation with its purpose, every parameter and member described, an
   example for every request and answer, every error code listed where it can occur, and the behaviours a client
   relies on (idempotency, pagination, partial batches, cancellation, retries) told in the operations' text.
+- **Decided** ([ADR 0029](adr/0029-contract-tests-and-documentation-page.md)): `kin-openapi` in tests checks the
+  contract, the routes both ways, and every answer the tests see; Swagger UI at `/docs` from jsDelivr, pinned with
+  integrity hashes; examples taken from the running service.
 
 ### 29. README
 - **Setup, run and test first**, through the make targets (`make up`, `make smoke`, `make test`, `make deps`,

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/api/contract"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 )
 
@@ -21,7 +22,9 @@ func serve(t *testing.T, h *Handler, path string) (*httptest.ResponseRecorder, m
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+	mux.ServeHTTP(rec, r)
+	contract.Check(t, r, rec.Code, rec.Header(), rec.Body.Bytes())
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("%s: not JSON: %s", path, rec.Body)

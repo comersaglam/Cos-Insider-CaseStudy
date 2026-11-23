@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/api/contract"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/testenv"
 )
@@ -144,8 +145,13 @@ func call(t *testing.T, method, url, body string, header map[string]string) (int
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract.Check(t, req, resp.StatusCode, resp.Header, raw)
 	var decoded map[string]any
-	if err := json.UnmarshalRead(resp.Body, &decoded); err != nil {
+	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("%s %s: response is not JSON: %v", method, url, err)
 	}
 	return resp.StatusCode, resp.Header, decoded

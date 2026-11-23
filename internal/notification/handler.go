@@ -47,7 +47,7 @@ func NewHandler(svc service, log *slog.Logger, maxBatchBody int64) *Handler {
 }
 
 // RegisterRoutes mounts the module's endpoints on mux (ADR 0008).
-func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+func (h *Handler) RegisterRoutes(mux httpx.Mux) {
 	mux.Handle("POST /v1/notifications", httpx.Handle(h.log, h.create))
 	mux.Handle("GET /v1/notifications", httpx.Handle(h.log, h.list))
 	mux.Handle("GET /v1/notifications/{id}", httpx.Handle(h.log, h.get))

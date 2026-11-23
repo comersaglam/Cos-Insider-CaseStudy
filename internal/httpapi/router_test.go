@@ -8,10 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"uuid"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/api"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/api/contract"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/health"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
@@ -56,6 +59,7 @@ func TestRouter(t *testing.T) {
 			r.Header.Set(observability.CorrelationHeader, "trace-me")
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, r)
+			contract.Check(t, r, rec.Code, rec.Header(), rec.Body.Bytes())
 
 			var p map[string]any
 			if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
@@ -106,12 +110,66 @@ func TestRouterServesProbes(t *testing.T) {
 		logs.Reset()
 		h := NewRouter(log, observability.NewRegistry(), tt.probes, notification.NewHandler(noNotifications{}, log, 1<<20))
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil)
+		h.ServeHTTP(rec, r)
+		contract.Check(t, r, rec.Code, rec.Header(), rec.Body.Bytes())
 		if rec.Code != tt.status {
 			t.Errorf("%s: status %d, want %d", tt.name, rec.Code, tt.status)
 		}
 		if logged := strings.Contains(logs.String(), `"msg":"http request"`); logged != tt.logged {
 			t.Errorf("%s: access logged %v, want %v:\n%s", tt.name, logged, tt.logged, logs.String())
+		}
+	}
+}
+
+// TestRouterServesTheContractAndItsDocumentation: the spec is served as it is in api/, and the documentation page
+// loads a pinned Swagger UI whose files the browser checks against their hashes.
+func TestRouterServesTheContractAndItsDocumentation(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/openapi.yaml", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/yaml" || !bytes.Equal(rec.Body.Bytes(), api.Spec) {
+		t.Errorf("GET /openapi.yaml = %d %q, %d bytes; want the spec", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/docs", nil))
+	page := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("GET /docs = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	for _, want := range []string{
+		`src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.36.0/swagger-ui-bundle.js"`,
+		`integrity="sha384-fUpRgC19yPykTqzdrUbdAg8NTiu16NEKf9U12J+IJWCg8/1mEI8f2+PEIz60Wyd+"`,
+		`href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.36.0/swagger-ui.css"`,
+		`integrity="sha384-z/AtSaOHGn5MJ5auAHXUypohywlIWLBZo1jeGmhdpVIbCnFhxAH92cwdV41oyINc"`,
+		`url: "/openapi.yaml"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the documentation page lacks %s", want)
+		}
+	}
+}
+
+// TestEveryRouteIsInTheContract: the routes the server registers and the operations api/openapi.yaml describes are
+// the same set, so neither has one the other lacks.
+func TestEveryRouteIsInTheContract(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	_, routes := newRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, log, 1<<20))
+	ops, err := contract.Operations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range routes {
+		if !slices.Contains(ops, r) {
+			t.Errorf("%s is served but not in the contract", r)
+		}
+	}
+	for _, op := range ops {
+		if !slices.Contains(routes, op) {
+			t.Errorf("%s is in the contract but not served", op)
 		}
 	}
 }

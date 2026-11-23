@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/comersaglam/Cos-Insider-CaseStudy/api/contract"
 )
 
 // fakeService records the drafts it receives and answers as configured.
@@ -132,6 +134,7 @@ func serveWithLimit(t *testing.T, svc service, limit int64, method, path, body s
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, r)
+	contract.Check(t, r, rec.Code, rec.Header(), rec.Body.Bytes())
 	return rec
 }
 

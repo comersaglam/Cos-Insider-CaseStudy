@@ -4,23 +4,100 @@ info:
   version: 0.1.0
   summary: Accepts notifications and reports their delivery over SMS, e-mail and push.
   description: |
-    Notifications are accepted here and delivered asynchronously by workers through an external provider
-    (docs/adr). This file is the API's contract, written by hand (design first) and changed in the same commit
-    as the behaviour it describes.
+    Notifications are accepted here and delivered asynchronously by workers through an external provider. This file
+    is the API's contract, written by hand (design first) and changed in the same commit as the behaviour it
+    describes; tests check every answer the API gives against it (docs/adr/0029).
 
-    Every error answer is `application/problem+json` (RFC 9457) with a stable `code`, the request's
-    `correlationId`, and, for invalid requests, `errors` located by JSON Pointer.
+    ## How a notification travels
 
-    Every request may carry `X-Correlation-ID` (1 to 128 visible ASCII characters); every answer carries the ID
-    the request was handled under, the client's or a new one. A notification keeps the ID of the request that created
-    it: the worker logs its sends under it, and sends it to the provider in the same header.
+    1. `POST /v1/notifications` (or a batch) validates it, stores it as `queued` and answers `202 Accepted` at once.
+    2. A worker takes it from its channel's queue, higher `priority` first, at most 100 sends a second per channel
+       by default, and sends `{to, channel, content}` to the provider. The provider also receives `Idempotency-Key` (the
+       notification's ID) and `X-Correlation-ID`.
+    3. Accepted by the provider, it becomes `sent`, with the provider's `providerMessageId`. Refused by it (a 4xx
+       other than 408 and 429), it becomes `failed` at once (`provider_rejected`). A timeout, a 408, a 429 or a 5xx
+       makes it `retrying`: it is sent again after an exponential delay with jitter, never sooner than the
+       provider's `Retry-After`, up to 8 attempts, then `failed` (`attempts_exhausted`).
+    4. A failed notification can be sent again, one by one (`POST /v1/notifications/{id}/retry`) or in bulk
+       (`POST /v1/notifications/retry`). One still waiting can be cancelled.
+
+    Delivery is at least once: a worker that stops in the middle of a send cannot know whether the provider
+    received it, so the notification is sent again; the provider can drop the repeat by its `Idempotency-Key`.
+
+    ```
+    queued ──▶ sending ──▶ sent
+      ▲  │        │
+      │  │        ├──▶ retrying ──▶ (sending again)
+      │  │        └──▶ failed ──(retry)──▶ queued
+      │  └──▶ cancelled        (retrying and scheduled can be cancelled too)
+    ```
+
+    ## Conventions
+
+    - **Idempotency**: `POST /v1/notifications` and `POST /v1/batches` take an `Idempotency-Key`. Repeating a request
+      with the same key returns what the first one created, marked `Idempotent-Replayed: true`, however much later;
+      the same key with a different request is refused (`422 idempotency_key_reused`). Keys never expire.
+    - **Pagination**: lists are ordered newest first and read a page at a time. Pass a page's `nextCursor` as
+      `cursor`, with the same filters, for the next page; the last page has no `nextCursor`.
+    - **Time**: every moment is ISO 8601 in UTC, such as `2026-11-23T20:25:14.888826Z`.
+    - **Correlation**: every request may carry `X-Correlation-ID` (1 to 128 visible ASCII characters); every answer
+      carries the ID the request was handled under, the client's or a new one. A notification keeps the ID of the
+      request that created it: the worker logs its sends under it and sends it to the provider.
+    - **Errors**: every 4xx and 5xx answer is `application/problem+json` (RFC 9457) with a stable `code`, the
+      request's `correlationId`, and, for invalid requests, `errors` locating each problem. Clients switch on
+      `code`, never on `detail`.
+
+    | `code` | Status | Meaning |
+    |---|---|---|
+    | `invalid_json` | 400 | The body is not valid JSON, or is empty or cut short. |
+    | `unknown_field` | 400 | The body has a member the request does not define. |
+    | `invalid_idempotency_key` | 400 | `Idempotency-Key` is not 1 to 255 visible ASCII characters. |
+    | `invalid_query` | 400 | A query parameter is unknown or malformed; `errors` names each one. |
+    | `not_found` | 404 | No resource has this ID, or the ID is not a UUID, or no route has this path. |
+    | `method_not_allowed` | 405 | The path exists but does not accept this method. |
+    | `not_cancellable` | 409 | The notification is being sent or is finished. |
+    | `not_retryable` | 409 | The notification is not failed. |
+    | `body_too_large` | 413 | The body is larger than the operation allows. |
+    | `unsupported_media_type` | 415 | The body is not sent as `application/json`. |
+    | `validation_failed` | 422 | The request breaks a rule; `errors` locates each one by JSON Pointer. |
+    | `idempotency_key_reused` | 422 | The `Idempotency-Key` was used for a different request. |
+    | `internal_error` | 500 | Something failed on the server; `correlationId` finds it in the logs. |
+    | `not_ready` | 503 | A dependency of the process does not answer (`/readyz` only). |
+
+    ## Limits
+
+    | What | Limit |
+    |---|---|
+    | SMS content | 1,600 characters |
+    | E-mail content | 100,000 characters |
+    | Push content | 1,000 characters |
+    | Create body | 1 MiB |
+    | Batch | 1 to 1,000 items, body up to 10 MiB |
+    | Bulk retry | 10,000 notifications per request; body up to 4 KiB |
+    | List page | 1 to 100 items, 50 by default |
+  contact:
+    name: Source and decisions
+    url: https://github.com/comersaglam/Cos-Insider-CaseStudy
 servers:
+  - url: /
+    description: the API serving this document, at /openapi.yaml
   - url: http://localhost:8080
     description: the local stack
+
+tags:
+  - name: Notifications
+    description: Create, read, list, cancel and retry single notifications.
+  - name: Batches
+    description: Accept up to 1,000 notifications in one request, and follow them.
+  - name: Metrics
+    description: The service's state, for people and for Prometheus.
+  - name: Operations
+    description: Probes for orchestrators, and this contract.
 
 paths:
   /v1/notifications:
     post:
+      tags: [Notifications]
       operationId: createNotification
       summary: Accept a notification for sending
       description: |
@@ -28,7 +105,11 @@ paths:
         answer is `202 Accepted` because the notification is accepted, not yet sent: follow `Location` to see
         its status.
 
-        With an `Idempotency-Key`, repeating the request returns the first notification, marked with
+        The recipient's form depends on the channel: an E.164 phone number for `sms`, one e-mail address for
+        `email`, a device token for `push`. It is checked, never reformatted: `05551234567` is refused, not
+        turned into `+905551234567`.
+
+        With an `Idempotency-Key`, repeating the request returns the first notification as it is now, marked
         `Idempotent-Replayed: true`, however much later it is repeated. The same key with a different request is
         refused with `422 idempotency_key_reused`.
       parameters:
@@ -40,81 +121,147 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateNotificationRequest'
-            example:
-              to: '+905551234567'
-              channel: sms
-              content: Your order has shipped.
-              priority: high
+            examples:
+              sms:
+                summary: An SMS, sent before normal and low priority ones
+                value: { to: '+905551234567', channel: sms, content: Your order has shipped., priority: high }
+              email:
+                summary: An e-mail, at normal priority
+                value: { to: ayse@example.com, channel: email, content: Your invoice for November is ready. }
+              push:
+                summary: A push notification to a device token
+                value: { to: device-token-a1b2c3, channel: push, content: Your driver is two minutes away., priority: high }
       responses:
         '202':
           description: Accepted for sending, or a repeat of an accepted request.
           headers:
             Location:
               description: The notification's URL.
-              schema: { type: string, example: /v1/notifications/0193a8f2-7c1e-7b3a-9d4e-2f1a3b4c5d6e }
+              schema: { type: string, example: /v1/notifications/01a20a15-8f87-79a7-b325-10f29616e45e }
             Idempotent-Replayed:
-              description: Present, as `true`, when the request repeats an earlier one with the same key.
-              schema: { type: string, enum: ['true'] }
+              $ref: '#/components/headers/IdempotentReplayed'
             X-Correlation-ID:
               $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+              examples:
+                accepted:
+                  summary: Accepted, waiting for a worker
+                  value:
+                    id: 01a20a15-8f87-79a7-b325-10f29616e45e
+                    to: '+905551234567'
+                    channel: sms
+                    content: Your order has shipped.
+                    priority: high
+                    status: queued
+                    correlationId: req-7f3c9a
+                    attempts: 0
+                    createdAt: '2026-11-23T20:25:14.888826Z'
+                    updatedAt: '2026-11-23T20:25:14.888826Z'
+                replayed:
+                  summary: A repeat with the same key, answered with the notification as it is now
+                  value:
+                    id: 01a20a15-8f87-79a7-b325-10f29616e45e
+                    to: '+905551234567'
+                    channel: sms
+                    content: Your order has shipped.
+                    priority: high
+                    status: sending
+                    correlationId: req-7f3c9a
+                    attempts: 1
+                    createdAt: '2026-11-23T20:25:14.888826Z'
+                    updatedAt: '2026-11-23T20:25:14.917693Z'
         '400':
-          description: >-
-            The body is not valid JSON (`invalid_json`), has a member the request does not define
-            (`unknown_field`), or the `Idempotency-Key` header is malformed (`invalid_idempotency_key`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/BadRequest'
         '413':
-          description: The body is larger than 1 MiB (`body_too_large`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/BodyTooLarge'
         '415':
-          description: The body is not sent as `application/json` (`unsupported_media_type`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/UnsupportedMediaType'
         '422':
           description: >-
-            The notification breaks a rule (`validation_failed`, with `errors`), or the idempotency key was used for
-            a different request (`idempotency_key_reused`).
-          $ref: '#/components/responses/Problem'
+            The notification breaks a rule (`validation_failed`, with `errors` locating each one), or the
+            idempotency key was used for a different request (`idempotency_key_reused`).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                validationFailed:
+                  summary: Two rules broken
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: the request is invalid
+                    code: validation_failed
+                    correlationId: req-7f3c9a
+                    errors:
+                      - { pointer: /to, code: invalid, detail: must be an E.164 phone number such as +905551234567 }
+                      - { pointer: /content, code: required, detail: is required }
+                idempotencyKeyReused:
+                  summary: The key belongs to another request
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: this Idempotency-Key was used for a different request
+                    code: idempotency_key_reused
+                    correlationId: req-7f3c9a
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
     get:
+      tags: [Notifications]
       operationId: listNotifications
       summary: List notifications, newest first, a page at a time
       description: |
         Filters combine with AND; `status` and `channel` may be given several times and then match any of their
-        values. Pages are ordered newest first and follow each other by cursor: pass `nextCursor` from a page as
-        `cursor` to get the next, with the same filters. A cursor is opaque. An unknown parameter is refused, so a
-        misspelt filter does not list everything.
+        values. Pages are ordered newest first, by creation time and then ID, and follow each other by cursor:
+        pass `nextCursor` from a page as `cursor` to get the next, with the same filters. A cursor is opaque, and
+        notifications created while paging never shift a page. An unknown parameter is refused, so a misspelt
+        filter does not list everything.
       parameters:
         - name: status
           in: query
+          description: Only notifications in one of these statuses. Repeat the parameter for several.
           schema: { type: array, items: { $ref: '#/components/schemas/Status' } }
           style: form
           explode: true
+          example: [failed]
         - name: channel
           in: query
+          description: Only notifications of one of these channels. Repeat the parameter for several.
           schema: { type: array, items: { $ref: '#/components/schemas/Channel' } }
           style: form
           explode: true
+          example: [sms, email]
         - name: batchId
           in: query
+          description: Only the notifications of this batch.
           schema: { type: string, format: uuid }
+          example: 01a20a15-afcd-7655-b81f-dc19ac56238f
         - name: createdFrom
           in: query
           description: Created at or after this time (RFC 3339, with its offset).
           schema: { type: string, format: date-time }
+          example: '2026-11-23T00:00:00Z'
         - name: createdTo
           in: query
           description: Created before this time.
           schema: { type: string, format: date-time }
+          example: '2026-11-24T00:00:00Z'
         - name: limit
           in: query
+          description: How many notifications a page holds at most.
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
         - name: cursor
           in: query
+          description: The `nextCursor` of the previous page; leave it out for the first page.
           schema: { type: string }
         - $ref: '#/components/parameters/CorrelationID'
       responses:
@@ -127,16 +274,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationPage'
+              example:
+                items:
+                  - id: 01a20a15-a8a5-7620-a068-4f36a93ba276
+                    to: device-token-a1b2c3
+                    channel: push
+                    content: Your driver is two minutes away.
+                    priority: high
+                    status: cancelled
+                    correlationId: req-7f3c9a
+                    attempts: 0
+                    createdAt: '2026-11-23T20:25:21.319486Z'
+                    updatedAt: '2026-11-23T20:25:21.377676Z'
+                  - id: 01a20a15-9959-75ed-8482-99d51e42c8a8
+                    to: ayse@example.com
+                    channel: email
+                    content: Your invoice for November is ready.
+                    priority: normal
+                    status: sent
+                    correlationId: req-7f3c9a
+                    attempts: 1
+                    providerMessageId: 64229625-6275-48c9-983c-6669f371fc9d
+                    createdAt: '2026-11-23T20:25:17.401467Z'
+                    updatedAt: '2026-11-23T20:25:17.414988Z'
+                nextCursor: MjAyNi0xMS0yM1QyMDoyNToxNy40MDE0NjdaIDAxYTIwYTE1LTk5NTktNzVlZC04NDgyLTk5ZDUxZTQyYzhhOA
         '400':
           description: A parameter is unknown or malformed (`invalid_query`, with `errors` naming each `parameter`).
-          $ref: '#/components/responses/Problem'
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the query is invalid
+                code: invalid_query
+                correlationId: req-7f3c9a
+                errors:
+                  - { parameter: limit, code: invalid, detail: must be a whole number from 1 to 100 }
+                  - { parameter: statsu, code: invalid, detail: is not a parameter of this list }
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
   /v1/notifications/{id}:
     get:
+      tags: [Notifications]
       operationId: getNotification
       summary: Read a notification and its status
+      description: |
+        The notification as it is now: its status, how many attempts it has spent, and, once it is finished, the
+        provider's message ID or why it failed. Each attempt's outcome is in the worker's logs, under the
+        notification's `correlationId`.
       parameters:
         - $ref: '#/components/parameters/NotificationID'
         - $ref: '#/components/parameters/CorrelationID'
@@ -150,44 +342,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+              examples:
+                sent:
+                  summary: Sent at the first attempt
+                  value:
+                    id: 01a20a15-8f87-79a7-b325-10f29616e45e
+                    to: '+905551234567'
+                    channel: sms
+                    content: Your order has shipped.
+                    priority: high
+                    status: sent
+                    correlationId: req-7f3c9a
+                    attempts: 1
+                    providerMessageId: 9190f514-ae52-4b1a-a497-5087a862efde
+                    createdAt: '2026-11-23T20:25:14.888826Z'
+                    updatedAt: '2026-11-23T20:25:15.092411Z'
+                failed:
+                  summary: Refused by the provider
+                  value:
+                    id: 01a20a15-9926-7e7d-a858-0d4b2d3ac843
+                    to: '+905550000422'
+                    channel: sms
+                    content: Your code is 4711.
+                    priority: normal
+                    status: failed
+                    correlationId: req-7f3c9a
+                    failedAt: '2026-11-23T20:25:17.39671Z'
+                    attempts: 1
+                    failureReason: provider_rejected
+                    createdAt: '2026-11-23T20:25:17.351027Z'
+                    updatedAt: '2026-11-23T20:25:17.39671Z'
         '404':
-          description: No notification has this ID, or the ID is not a UUID (`not_found`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
   /v1/notifications/{id}/cancel:
     post:
+      tags: [Notifications]
       operationId: cancelNotification
       summary: Cancel a notification that is still waiting
       description: |
-        A `scheduled`, `queued` or `retrying` notification is cancelled; a worker that has already claimed it wins,
-        and the cancel is refused. Cancelling a cancelled notification answers it again, so the request is safe to
-        repeat.
+        A `scheduled`, `queued` or `retrying` notification is cancelled and will not be sent. A worker that has
+        already claimed it wins, and the cancel is refused. Cancelling a cancelled notification answers it again,
+        so the request is safe to repeat. The request has no body.
       parameters:
         - $ref: '#/components/parameters/NotificationID'
         - $ref: '#/components/parameters/CorrelationID'
       responses:
         '200':
           description: The notification, cancelled.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+              example:
+                id: 01a20a15-a8a5-7620-a068-4f36a93ba276
+                to: device-token-a1b2c3
+                channel: push
+                content: Your driver is two minutes away.
+                priority: high
+                status: cancelled
+                correlationId: req-7f3c9a
+                attempts: 0
+                createdAt: '2026-11-23T20:25:21.319486Z'
+                updatedAt: '2026-11-23T20:25:21.377676Z'
         '404':
-          description: No notification has this ID (`not_found`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/NotFound'
         '409':
           description: The notification is being sent or is finished (`not_cancellable`; `detail` names its status).
-          $ref: '#/components/responses/Problem'
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Conflict
+                status: 409
+                detail: 'notification can no longer be cancelled: it is sent'
+                code: not_cancellable
+                correlationId: req-7f3c9a
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
   /v1/notifications/{id}/retry:
     post:
+      tags: [Notifications]
       operationId: retryNotification
       summary: Send a failed notification again
-      description: The notification goes back to `queued` with a fresh set of attempts.
+      description: |
+        The notification goes back to `queued` with a fresh set of attempts and no failure reason, and keeps its
+        correlation ID. Only a `failed` notification can be retried. The request has no body.
       parameters:
         - $ref: '#/components/parameters/NotificationID'
         - $ref: '#/components/parameters/CorrelationID'
@@ -197,28 +448,58 @@ paths:
           headers:
             Location:
               description: The notification's URL.
-              schema: { type: string }
+              schema: { type: string, example: /v1/notifications/01a20a15-9926-7e7d-a858-0d4b2d3ac843 }
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Notification'
+              example:
+                id: 01a20a15-9926-7e7d-a858-0d4b2d3ac843
+                to: '+905550000422'
+                channel: sms
+                content: Your code is 4711.
+                priority: normal
+                status: queued
+                correlationId: req-7f3c9a
+                attempts: 0
+                createdAt: '2026-11-23T20:25:17.351027Z'
+                updatedAt: '2026-11-23T20:25:20.468881Z'
         '404':
-          description: No notification has this ID (`not_found`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/NotFound'
         '409':
           description: The notification is not failed (`not_retryable`; `detail` names its status).
-          $ref: '#/components/responses/Problem'
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Conflict
+                status: 409
+                detail: 'only a failed notification can be retried: it is sent'
+                code: not_retryable
+                correlationId: req-7f3c9a
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
   /v1/notifications/retry:
     post:
+      tags: [Notifications]
       operationId: retryFailedNotifications
       summary: Send failed notifications again in bulk
       description: |
-        Puts the failed notifications that failed inside the window, optionally of one channel or batch, back in
+        Puts the notifications that failed inside the window, optionally of one channel or one batch, back in
         the queue, oldest failure first, at most 10,000 per request; repeat the request for the rest while
-        `matched` exceeds `requeued`. A dry run only counts.
+        `matched` exceeds `requeued`. Each gets a fresh set of attempts, as a single retry gives. A dry run only
+        counts, and answers `200` instead of `202`.
+
+        Use it after an outage of the provider: the notifications that ran out of attempts during it fail
+        together and are sent again together.
       parameters:
         - $ref: '#/components/parameters/CorrelationID'
       requestBody:
@@ -227,99 +508,44 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/RetryRequest'
-            example: { channel: sms, failedFrom: '2026-11-23T10:00:00Z', failedTo: '2026-11-23T11:00:00Z', dryRun: true }
+            examples:
+              dryRun:
+                summary: Count the failures of an hour
+                value: { failedFrom: '2026-11-23T10:00:00Z', failedTo: '2026-11-23T11:00:00Z', dryRun: true }
+              sms:
+                summary: Send the hour's failed SMS again
+                value: { channel: sms, failedFrom: '2026-11-23T10:00:00Z', failedTo: '2026-11-23T11:00:00Z' }
       responses:
         '200':
           description: A dry run; nothing changed.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RetryResult'
+              example: { matched: 2, requeued: 0, dryRun: true }
         '202':
           description: The notifications requeued.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RetryResult'
+              example: { matched: 2, requeued: 2, dryRun: false }
         '400':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '422':
-          description: The window is missing or empty, or the channel unknown (`validation_failed`).
-          $ref: '#/components/responses/Problem'
-        '500':
-          $ref: '#/components/responses/Problem'
-
-  /v1/metrics:
-    get:
-      operationId: getMetricsSummary
-      summary: The service's state as a person reads it
-      description: |
-        Notifications waiting now, by channel and status, and how sending went over the last five minutes: attempts by
-        outcome, the success rate, and the provider's latency percentiles. Computed from the database, so every replica
-        answers the same. Prometheus scrapes `/metrics` on the API (port 8080) and the worker (port 9090) instead.
-      parameters:
-        - $ref: '#/components/parameters/CorrelationID'
-      responses:
-        '200':
-          description: The summary.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MetricsSummary'
-        '500':
-          $ref: '#/components/responses/Problem'
-
-  /healthz:
-    get:
-      operationId: getLiveness
-      summary: Whether the process runs
-      description: |
-        Answers 200 while the process runs, whatever the state of its dependencies, since restarting it would not
-        bring a database back (ADR 0027). For a liveness probe. The worker serves the same on its operations port
-        (9090). A successful call is logged at debug level only.
-      parameters:
-        - $ref: '#/components/parameters/CorrelationID'
-      responses:
-        '200':
-          description: The process runs.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status]
-                properties:
-                  status: { type: string, const: ok }
-
-  /readyz:
-    get:
-      operationId: getReadiness
-      summary: Whether the process can do its work
-      description: |
-        Checks every dependency at once, each within two seconds: PostgreSQL for the API; PostgreSQL and RabbitMQ for
-        the worker, on its operations port (9090). For a readiness probe; the containers' health checks run it
-        through `api healthcheck` and `worker healthcheck` (ADR 0027). Why a dependency failed is logged, never
-        answered, since the error can hold a host or a user name. A successful call is logged at debug level only.
-      parameters:
-        - $ref: '#/components/parameters/CorrelationID'
-      responses:
-        '200':
-          description: Every dependency answered.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, checks]
-                properties:
-                  status: { type: string, const: ready }
-                  checks:
-                    type: object
-                    description: Each dependency checked, by name.
-                    additionalProperties: { type: string, const: ok }
-              example: { status: ready, checks: { postgres: ok } }
-        '503':
-          description: |
-            A dependency did not answer: `code` is `not_ready` and `detail` names the dependencies, such as
-            "postgres did not answer".
+          description: >-
+            The window is missing or empty, or the channel is unknown (`validation_failed`, with `errors` locating
+            each problem).
           headers:
             X-Correlation-ID:
               $ref: '#/components/headers/CorrelationID'
@@ -327,25 +553,23 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
-
-  /metrics:
-    get:
-      operationId: getPrometheusMetrics
-      summary: Metrics in Prometheus's text format
-      description: |
-        For Prometheus to scrape (ADR 0026): HTTP requests by method, route and status, their latency, and the Go
-        runtime's and the process's metrics. The worker serves its own on its operations port (9090): attempts,
-        provider latency, breaker state, queue depths and more. People read `GET /v1/metrics` instead. A successful
-        call is logged at debug level only.
-      responses:
-        '200':
-          description: The metrics.
-          content:
-            text/plain:
-              schema: { type: string }
+              example:
+                type: about:blank
+                title: Unprocessable Entity
+                status: 422
+                detail: the request is invalid
+                code: validation_failed
+                correlationId: req-7f3c9a
+                errors:
+                  - { pointer: /failedFrom, code: required, detail: is required }
+                  - { pointer: /failedTo, code: required, detail: is required }
+                  - { pointer: /channel, code: invalid, detail: 'must be one of sms, email, push' }
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /v1/batches:
     post:
+      tags: [Batches]
       operationId: createBatch
       summary: Accept up to 1000 notifications at once
       description: |
@@ -355,7 +579,8 @@ paths:
         which case nothing is stored.
 
         The answer lists the ID each accepted item was given, by its position in the request. The batch keeps
-        the rejected items' positions and reasons, never their content, and shows them when read.
+        the rejected items' positions and reasons, never their content, and shows them when read. The accepted
+        notifications are listed with `GET /v1/notifications?batchId=`.
 
         An `Idempotency-Key` covers the whole batch: repeating the request returns the first batch, marked
         `Idempotent-Replayed: true`. Batch keys and notification keys are separate.
@@ -379,40 +604,82 @@ paths:
           headers:
             Location:
               description: The batch's URL.
-              schema: { type: string, example: /v1/batches/0193a8f2-7c1e-7b3a-9d4e-2f1a3b4c5d70 }
+              schema: { type: string, example: /v1/batches/01a20a15-afcd-7655-b81f-dc19ac56238f }
             Idempotent-Replayed:
-              description: Present, as `true`, when the request repeats an earlier one with the same key.
-              schema: { type: string, enum: ['true'] }
+              $ref: '#/components/headers/IdempotentReplayed'
             X-Correlation-ID:
               $ref: '#/components/headers/CorrelationID'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Batch'
+              example:
+                id: 01a20a15-afcd-7655-b81f-dc19ac56238f
+                total: 3
+                accepted: 2
+                rejected: 1
+                notifications:
+                  - { index: 0, id: 01a20a15-afcd-7776-9e48-3825d70d25db }
+                  - { index: 2, id: 01a20a15-afcd-77a6-8b8e-51c4e51c70ee }
+                rejections:
+                  - index: 1
+                    errors:
+                      - { pointer: /notifications/1/to, code: invalid, detail: must be an E.164 phone number such as +905551234567 }
+                correlationId: req-7f3c9a
+                createdAt: '2026-11-23T20:25:23.149601Z'
         '400':
-          description: >-
-            The body is not valid JSON (`invalid_json`), has a member the request does not define
-            (`unknown_field`), or the `Idempotency-Key` header is malformed (`invalid_idempotency_key`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/BadRequest'
         '413':
-          description: The body is larger than the batch limit, 10 MiB by default (`body_too_large`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/BodyTooLarge'
         '415':
-          description: The body is not sent as `application/json` (`unsupported_media_type`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/UnsupportedMediaType'
         '422':
           description: >-
             No item is valid, or the batch is empty or holds more than 1000 items (`validation_failed`, with
             `errors` such as `/notifications/3/to`), or the idempotency key was used for a different batch
-            (`idempotency_key_reused`).
-          $ref: '#/components/responses/Problem'
+            (`idempotency_key_reused`). Nothing is stored.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                noValidItem:
+                  summary: Every item breaks a rule
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: no notification of the batch is valid
+                    code: validation_failed
+                    correlationId: req-7f3c9a
+                    errors:
+                      - { pointer: /notifications/0/to, code: invalid, detail: must be an E.164 phone number such as +905551234567 }
+                      - { pointer: /notifications/1/channel, code: invalid, detail: 'must be one of sms, email, push' }
+                      - { pointer: /notifications/1/to, code: required, detail: is required }
+                      - { pointer: /notifications/1/content, code: required, detail: is required }
+                idempotencyKeyReused:
+                  summary: The key belongs to another batch
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: this Idempotency-Key was used for a different request
+                    code: idempotency_key_reused
+                    correlationId: req-7f3c9a
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
 
   /v1/batches/{id}:
     get:
+      tags: [Batches]
       operationId: getBatch
       summary: Read a batch, its notifications counted by status
+      description: |
+        The batch's counts, its rejected items, and its notifications counted by their status now, which shows how
+        far its delivery has gone. The notifications themselves are listed with `GET /v1/notifications?batchId=`.
       parameters:
         - $ref: '#/components/parameters/BatchID'
         - $ref: '#/components/parameters/CorrelationID'
@@ -426,11 +693,199 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Batch'
+              example:
+                id: 01a20a15-afcd-7655-b81f-dc19ac56238f
+                total: 3
+                accepted: 2
+                rejected: 1
+                statuses: { sent: 2 }
+                rejections:
+                  - index: 1
+                    errors:
+                      - { pointer: /notifications/1/to, code: invalid, detail: must be an E.164 phone number such as +905551234567 }
+                correlationId: req-7f3c9a
+                createdAt: '2026-11-23T20:25:23.149601Z'
         '404':
-          description: No batch has this ID, or the ID is not a UUID (`not_found`).
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/Problem'
+          $ref: '#/components/responses/InternalError'
+
+  /v1/metrics:
+    get:
+      tags: [Metrics]
+      operationId: getMetricsSummary
+      summary: The service's state as a person reads it
+      description: |
+        Notifications waiting now, by channel and status, and how sending went over the last five minutes: attempts
+        by outcome, the success rate, and the provider's latency percentiles. Computed from the database, so every
+        replica answers the same (ADR 0026). Prometheus scrapes `/metrics` on the API (port 8080) and the worker
+        (port 9090) instead.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The summary.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsSummary'
+              example:
+                generatedAt: '2026-11-23T20:25:27.365209343Z'
+                windowSeconds: 300
+                channels:
+                  sms:
+                    waiting: { scheduled: 0, queued: 0, retrying: 1, sending: 0 }
+                    attempts: { success: 2, permanent: 4, permanentAlert: 0, transient: 1, unknown: 0 }
+                    successRate: 0.2857
+                    latencyMs: { p50: 30, p95: 388, p99: 462.4 }
+                  email:
+                    waiting: { scheduled: 0, queued: 0, retrying: 0, sending: 0 }
+                    attempts: { success: 2, permanent: 0, permanentAlert: 0, transient: 0, unknown: 0 }
+                    successRate: 1
+                    latencyMs: { p50: 5.5, p95: 6, p99: 6 }
+                  push:
+                    waiting: { scheduled: 0, queued: 0, retrying: 0, sending: 0 }
+                    attempts: { success: 0, permanent: 0, permanentAlert: 0, transient: 0, unknown: 0 }
+                    successRate: null
+                    latencyMs: null
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /metrics:
+    get:
+      tags: [Metrics]
+      operationId: getPrometheusMetrics
+      summary: Metrics in Prometheus's text format
+      description: |
+        For Prometheus to scrape (ADR 0026): HTTP requests by method, route and status, their latency, and the Go
+        runtime's and the process's metrics, all under the `notifications_` prefix. The worker serves its own on its
+        operations port (9090): attempts by channel and outcome, provider latency, circuit breaker state, sends in
+        flight, queue depths in PostgreSQL and RabbitMQ, the dead-letter queue, and more. People read
+        `GET /v1/metrics` instead. A successful call is logged at debug level only.
+      responses:
+        '200':
+          description: The metrics.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            text/plain:
+              schema: { type: string }
+              example: |
+                # HELP notifications_http_requests_total HTTP requests answered, by method, route pattern and status.
+                # TYPE notifications_http_requests_total counter
+                notifications_http_requests_total{method="POST",route="/v1/notifications",status="202"} 3
+
+  /healthz:
+    get:
+      tags: [Operations]
+      operationId: getLiveness
+      summary: Whether the process runs
+      description: |
+        Answers 200 while the process runs, whatever the state of its dependencies, since restarting it would not
+        bring a database back (ADR 0027). For a liveness probe. The worker serves the same on its operations port
+        (9090). A successful call is logged at debug level only.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The process runs.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+              example: { status: ok }
+
+  /readyz:
+    get:
+      tags: [Operations]
+      operationId: getReadiness
+      summary: Whether the process can do its work
+      description: |
+        Checks every dependency at once, each within two seconds: PostgreSQL for the API; PostgreSQL and RabbitMQ for
+        the worker, on its operations port (9090). For a readiness probe; the containers' health checks run it
+        through `api healthcheck` and `worker healthcheck` (ADR 0027). Why a dependency failed is logged, never
+        answered, since the error can hold a host or a user name. A successful call is logged at debug level only.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: Every dependency answered.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status: { type: string, const: ready }
+                  checks:
+                    type: object
+                    description: Each dependency checked, by name.
+                    additionalProperties: { type: string, const: ok }
+              example: { status: ready, checks: { postgres: ok } }
+        '503':
+          description: A dependency did not answer (`not_ready`); `detail` names the dependencies.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Service Unavailable
+                status: 503
+                detail: postgres did not answer
+                code: not_ready
+                correlationId: 01a20a02-15ee-7f20-bbce-3a15678e0e63
+
+  /openapi.yaml:
+    get:
+      tags: [Operations]
+      operationId: getContract
+      summary: This document
+      description: The API's contract, as the server holds it; a client or a code generator can read it from here.
+      responses:
+        '200':
+          description: The contract, in YAML.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/yaml:
+              schema: { type: string }
+
+  /docs:
+    get:
+      tags: [Operations]
+      operationId: getDocumentation
+      summary: This document, rendered
+      description: |
+        A page that renders this contract with Swagger UI, whose "Try it out" sends requests to the API serving the
+        page. Swagger UI is loaded from jsDelivr at a pinned version, and the browser checks each file against its
+        integrity hash (ADR 0029).
+      responses:
+        '200':
+          description: The page.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            text/html:
+              schema: { type: string }
 
 components:
   parameters:
@@ -438,34 +893,48 @@ components:
       name: id
       in: path
       required: true
+      description: The notification's ID. One that is not a UUID is answered as not found.
       schema: { type: string, format: uuid }
+      example: 01a20a15-8f87-79a7-b325-10f29616e45e
     BatchID:
       name: id
       in: path
       required: true
+      description: The batch's ID. One that is not a UUID is answered as not found.
       schema: { type: string, format: uuid }
+      example: 01a20a15-afcd-7655-b81f-dc19ac56238f
     IdempotencyKey:
       name: Idempotency-Key
       in: header
       required: false
       description: >-
-        A key the client chooses for the request, unique to it, such as `order-42-sms`. It never expires.
+        A key the client chooses for the request, unique to it, such as `order-42-sms`. Repeating the request with
+        the key returns what the first one created; the key never expires.
       schema: { type: string, minLength: 1, maxLength: 255, pattern: '^[!-~]+$' }
+      example: order-42-sms
     CorrelationID:
       name: X-Correlation-ID
       in: header
       required: false
-      description: An ID that joins the logs of everything this request causes; a new one is made when absent or invalid.
+      description: >-
+        An ID that joins the logs of everything this request causes, the worker's sends included; a new one is made
+        when it is absent or invalid.
       schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[!-~]+$' }
+      example: req-7f3c9a
 
   headers:
     CorrelationID:
-      description: The correlation ID the request was handled under.
-      schema: { type: string }
+      description: The correlation ID the request was handled under, the client's or a new one.
+      schema: { type: string, example: req-7f3c9a }
+    IdempotentReplayed:
+      description: Present, as `true`, when the request repeats an earlier one with the same `Idempotency-Key`.
+      schema: { type: string, enum: ['true'] }
 
   responses:
-    Problem:
-      description: An error, as RFC 9457 describes it.
+    BadRequest:
+      description: >-
+        The body is not valid JSON (`invalid_json`), has a member the request does not define (`unknown_field`), or
+        the `Idempotency-Key` header is malformed (`invalid_idempotency_key`, where the operation takes one).
       headers:
         X-Correlation-ID:
           $ref: '#/components/headers/CorrelationID'
@@ -473,15 +942,114 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
+          examples:
+            invalidJson:
+              summary: The body is cut short
+              value:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the request body is empty or cut short
+                code: invalid_json
+                correlationId: req-7f3c9a
+            unknownField:
+              summary: A member the request does not define
+              value:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the member "subject" is not part of the request
+                code: unknown_field
+                correlationId: req-7f3c9a
+            invalidIdempotencyKey:
+              summary: A key with a space in it
+              value:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the Idempotency-Key header must be 1 to 255 visible ASCII characters
+                code: invalid_idempotency_key
+                correlationId: req-7f3c9a
+    BodyTooLarge:
+      description: >-
+        The body is larger than the operation allows (`body_too_large`): 1 MiB for a notification, 10 MiB by
+        default for a batch, 4 KiB for a bulk retry.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Request Entity Too Large
+            status: 413
+            detail: the request body must be at most 1048576 bytes
+            code: body_too_large
+            correlationId: req-7f3c9a
+    UnsupportedMediaType:
+      description: The body is not sent as `application/json` (`unsupported_media_type`).
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unsupported Media Type
+            status: 415
+            detail: the request body must be sent as application/json
+            code: unsupported_media_type
+            correlationId: req-7f3c9a
+    NotFound:
+      description: No resource has this ID, or the ID is not a UUID (`not_found`).
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Not Found
+            status: 404
+            detail: nothing has this ID
+            code: not_found
+            correlationId: req-7f3c9a
+    InternalError:
+      description: >-
+        Something failed on the server (`internal_error`). The answer reveals nothing of it; the logs hold it under
+        `correlationId`.
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Internal Server Error
+            status: 500
+            detail: the request could not be completed
+            code: internal_error
+            correlationId: req-7f3c9a
 
   schemas:
     Channel:
       type: string
       enum: [sms, email, push]
+      description: How the notification is delivered; each channel has its own queue and rate limit.
     Priority:
       type: string
       enum: [high, normal, low]
-      description: Orders waiting work within a channel; it is not sent to the provider.
+      description: >-
+        Orders waiting work within a channel: a high one is sent before normal and low ones waiting with it. It is
+        not sent to the provider.
     Status:
       type: string
       enum: [scheduled, queued, sending, retrying, sent, failed, cancelled]
@@ -493,6 +1061,7 @@ components:
       type: object
       additionalProperties: false
       required: [to, channel, content]
+      description: The notification to send; the members are the provider's, and priority orders the queue.
       properties:
         to:
           type: string
@@ -530,22 +1099,27 @@ components:
       required: [id, to, channel, content, priority, status, correlationId, attempts, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid, description: 'A version 7 UUID; it sorts by creation time.' }
-        to: { type: string }
+        to: { type: string, description: 'The recipient, as it was sent.' }
         channel: { $ref: '#/components/schemas/Channel' }
-        content: { type: string }
+        content: { type: string, description: 'The message, as it was sent.' }
         priority: { $ref: '#/components/schemas/Priority' }
         status: { $ref: '#/components/schemas/Status' }
-        correlationId: { type: string }
+        correlationId: { type: string, description: 'The correlation ID of the request that created it.' }
         batchId: { type: string, format: uuid, description: 'The batch it came in, when it came in one.' }
         failedAt: { type: string, format: date-time, description: 'When it failed, while it is failed (UTC).' }
-        attempts: { type: integer, description: 'Attempts spent since it was created or last retried by hand.' }
+        attempts:
+          type: integer
+          minimum: 0
+          description: Attempts spent since it was created or last retried by hand; at most 8.
         failureReason:
           type: string
           enum: [provider_rejected, attempts_exhausted, unprocessable_message]
-          description: Why it failed, while it is failed.
+          description: |
+            Why it failed, while it is failed: the provider refused it (`provider_rejected`), every attempt failed
+            (`attempts_exhausted`), or its queue message could not be read (`unprocessable_message`).
         providerMessageId: { type: string, description: "The provider's ID for the message, once sent." }
-        createdAt: { type: string, format: date-time, description: 'UTC' }
-        updatedAt: { type: string, format: date-time, description: 'UTC' }
+        createdAt: { type: string, format: date-time, description: 'When it was accepted (UTC).' }
+        updatedAt: { type: string, format: date-time, description: 'When it last changed (UTC).' }
 
     NotificationPage:
       type: object
@@ -553,6 +1127,7 @@ components:
       properties:
         items:
           type: array
+          description: Newest first.
           items: { $ref: '#/components/schemas/Notification' }
         nextCursor:
           type: string
@@ -562,20 +1137,23 @@ components:
       type: object
       additionalProperties: false
       required: [failedFrom, failedTo]
+      description: Which failed notifications to send again; the filters combine with AND.
       properties:
         channel: { $ref: '#/components/schemas/Channel' }
-        batchId: { type: string, format: uuid }
+        batchId: { type: string, format: uuid, description: 'Only the notifications of this batch.' }
         failedFrom: { type: string, format: date-time, description: 'Failed at or after this time.' }
-        failedTo: { type: string, format: date-time, description: 'Failed before this time.' }
-        dryRun: { type: boolean, default: false }
+        failedTo: { type: string, format: date-time, description: 'Failed before this time; after failedFrom.' }
+        dryRun: { type: boolean, default: false, description: 'Count only; change nothing.' }
 
     RetryResult:
       type: object
       required: [matched, requeued, dryRun]
       properties:
         matched: { type: integer, description: 'Failed notifications the filter selects.' }
-        requeued: { type: integer, description: 'Put back in the queue by this request; 0 on a dry run.' }
-        dryRun: { type: boolean }
+        requeued:
+          type: integer
+          description: Put back in the queue by this request, at most 10,000; 0 on a dry run.
+        dryRun: { type: boolean, description: 'Whether this was a dry run.' }
 
     CreateBatchRequest:
       type: object
@@ -588,13 +1166,28 @@ components:
           maxItems: 1000
           description: Each item is validated as a single create's body is; invalid items are reported, not fatal.
           items:
-            $ref: '#/components/schemas/CreateNotificationRequest'
+            $ref: '#/components/schemas/BatchItem'
+
+    BatchItem:
+      type: object
+      additionalProperties: false
+      description: |
+        One notification, written as a single create's body (`CreateNotificationRequest`). The whole request is
+        refused only when an item is not an object of these members with string values (`invalid_json`,
+        `unknown_field`). Each item's own rules (the members required, the recipient's form for its channel, the
+        content's length) are checked item by item: an item that breaks them is listed in the answer's
+        `rejections`, and the others are accepted.
+      properties:
+        to: { type: string, description: 'The recipient, in the form its channel requires.' }
+        channel: { type: string, description: '`sms`, `email` or `push`.' }
+        content: { type: string, description: 'The message.' }
+        priority: { type: string, description: '`high`, `normal` or `low`; `normal` when left out.' }
 
     Batch:
       type: object
       required: [id, total, accepted, rejected, rejections, correlationId, createdAt]
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string, format: uuid, description: 'A version 7 UUID.' }
         total: { type: integer, description: 'Items in the request.' }
         accepted: { type: integer, description: 'Items stored as notifications.' }
         rejected: { type: integer, description: 'Items refused; total = accepted + rejected.' }
@@ -606,7 +1199,7 @@ components:
             required: [index, id]
             properties:
               index: { type: integer, description: 'The position in the request, counted from zero.' }
-              id: { type: string, format: uuid }
+              id: { type: string, format: uuid, description: "The notification's ID." }
         statuses:
           type: object
           description: When the batch is read only; its notifications counted by their status now.
@@ -615,6 +1208,7 @@ components:
           example: { queued: 980, sent: 18 }
         rejections:
           type: array
+          description: The items refused, with why; their content is not kept.
           items:
             type: object
             required: [index, errors]
@@ -623,17 +1217,18 @@ components:
               errors:
                 type: array
                 items: { $ref: '#/components/schemas/FieldProblem' }
-        correlationId: { type: string }
-        createdAt: { type: string, format: date-time, description: 'UTC' }
+        correlationId: { type: string, description: 'The correlation ID of the request that created it.' }
+        createdAt: { type: string, format: date-time, description: 'When it was accepted (UTC).' }
 
     MetricsSummary:
       type: object
       required: [generatedAt, windowSeconds, channels]
       properties:
-        generatedAt: { type: string, format: date-time }
+        generatedAt: { type: string, format: date-time, description: 'When the summary was computed (UTC).' }
         windowSeconds: { type: integer, description: 'How far back attempts are counted: 300.' }
         channels:
           type: object
+          description: Every channel, by name.
           propertyNames: { $ref: '#/components/schemas/Channel' }
           additionalProperties: { $ref: '#/components/schemas/ChannelSummary' }
 
@@ -652,7 +1247,10 @@ components:
             sending: { type: integer }
         attempts:
           type: object
-          description: The window's attempts by outcome.
+          description: |
+            The window's attempts by outcome: sent (`success`), refused by the provider (`permanent`), refused for a
+            reason of our own such as a bad credential (`permanentAlert`), failed for now (`transient`), or lost
+            with a worker (`unknown`).
           required: [success, permanent, permanentAlert, transient, unknown]
           properties:
             success: { type: integer }
@@ -662,11 +1260,11 @@ components:
             unknown: { type: integer }
         successRate:
           type: [number, 'null']
-          description: Successful attempts over all of the window's attempts; null when there were none.
+          description: Successful attempts over all of the window's attempts, to four decimals; null when there were none.
           example: 0.9975
         latencyMs:
           type: [object, 'null']
-          description: The provider's latency over the window's answered attempts; null when there were none.
+          description: The provider's latency over the window's answered attempts, in milliseconds; null when there were none.
           properties:
             p50: { type: number }
             p95: { type: number }
@@ -675,18 +1273,34 @@ components:
     Problem:
       type: object
       required: [type, title, status, code]
+      description: An error, as RFC 9457 describes it, with a stable code.
       properties:
-        type: { type: string, description: 'Always about:blank; `code` names the problem.' }
+        type: { type: string, const: about:blank, description: '`code` names the problem instead.' }
         title: { type: string, description: 'The HTTP status text.' }
-        status: { type: integer }
-        detail: { type: string }
+        status: { type: integer, description: 'The HTTP status.' }
+        detail: { type: string, description: 'For people; it may change. Never switch on it.' }
         code:
           type: string
-          description: Stable and machine-readable; clients switch on it, never on `detail`.
-          examples: [validation_failed, idempotency_key_reused, not_found, invalid_json, internal_error]
-        correlationId: { type: string }
+          description: Stable and machine-readable; clients switch on it. The table in the introduction explains each.
+          enum:
+            - invalid_json
+            - unknown_field
+            - invalid_idempotency_key
+            - invalid_query
+            - not_found
+            - method_not_allowed
+            - not_cancellable
+            - not_retryable
+            - body_too_large
+            - unsupported_media_type
+            - validation_failed
+            - idempotency_key_reused
+            - internal_error
+            - not_ready
+        correlationId: { type: string, description: 'The correlation ID the request was handled under.' }
         errors:
           type: array
+          description: For `validation_failed` and `invalid_query`, each problem located.
           items: { $ref: '#/components/schemas/FieldProblem' }
 
     FieldProblem:
@@ -694,7 +1308,10 @@ components:
       description: A body member, located by `pointer`, or a query parameter, named by `parameter`.
       required: [code, detail]
       properties:
-        pointer: { type: string, description: 'A JSON Pointer to the member, such as /to.', example: /to }
+        pointer: { type: string, description: 'A JSON Pointer (RFC 6901) to the member, such as /to.', example: /to }
         parameter: { type: string, description: 'The query parameter, such as status.', example: status }
-        code: { type: string, enum: [required, invalid, too_long] }
-        detail: { type: string }
+        code:
+          type: string
+          enum: [required, invalid, too_long]
+          description: The member is missing (`required`), malformed (`invalid`), or longer than allowed (`too_long`).
+        detail: { type: string, description: 'For people.' }
