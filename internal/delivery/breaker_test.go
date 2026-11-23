@@ -29,9 +29,11 @@ func (s *scriptedSender) Send(context.Context, notification.Notification) Outcom
 	return s.script[min(i, len(s.script)-1)]
 }
 
+// breakerConfig opens the breaker once three attempts in a minute have been made and half of them failed.
 func breakerConfig() ConsumerConfig {
 	cfg := testConfig()
-	cfg.Concurrency, cfg.BreakerFailures, cfg.BreakerOpen = 1, 3, time.Hour
+	cfg.Concurrency, cfg.BreakerMinRequests, cfg.BreakerFailurePercent = 1, 3, 50
+	cfg.BreakerWindow, cfg.BreakerOpen = time.Minute, time.Hour
 	return cfg
 }
 
@@ -46,7 +48,7 @@ func messages(t *testing.T, a *acks, n int) <-chan amqp.Delivery {
 
 var unavailable = Outcome{Class: Transient, StatusCode: http.StatusServiceUnavailable, Err: errors.New("provider answered 503")}
 
-// TestBreakerOpensAndStopsTakingMessages: after three transient failures in a row the breaker opens and the
+// TestBreakerOpensAndStopsTakingMessages: after three transient failures, all of the attempts so far, the breaker opens and the
 // consumer takes no further message, so none is claimed and no attempt is spent while the provider is down.
 func TestBreakerOpensAndStopsTakingMessages(t *testing.T) {
 	var a acks
@@ -138,5 +140,39 @@ func waitUntil(t *testing.T, cond func() bool) {
 			t.Fatal("condition not met in 10 s")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+var accepted = Outcome{Class: Success, StatusCode: http.StatusAccepted, MessageID: "m"}
+
+// TestBreakerOpensOnAFailureRatioNotARun (ADR 0036): failures in a row among many successes, as retries queued
+// together arrive, do not open the breaker; a failure ratio at the threshold over enough attempts does.
+func TestBreakerOpensOnAFailureRatioNotARun(t *testing.T) {
+	run := func(script []Outcome) gobreaker.State {
+		var a acks
+		cfg := breakerConfig()
+		cfg.BreakerMinRequests = 10
+		c := NewConsumer(&fakeStore{}, &scriptedSender{script: append(script, accepted)}, cfg, testMetrics(), discard)
+		if err := runUntilSettled(t, c, messages(t, &a, len(script)), &a, len(script)); err != nil {
+			t.Fatal(err)
+		}
+		return c.breaker.State()
+	}
+	var burst []Outcome // 20 successes, then 6 failures in a row: 23% of 26
+	for range 20 {
+		burst = append(burst, accepted)
+	}
+	for range 6 {
+		burst = append(burst, unavailable)
+	}
+	if got := run(burst); got != gobreaker.StateClosed {
+		t.Errorf("six failures in a row among 20 successes: breaker %s, want closed", got)
+	}
+	var outage []Outcome // alternating, then failing: half of 10 by the tenth
+	for range 5 {
+		outage = append(outage, accepted, unavailable)
+	}
+	if got := run(outage); got != gobreaker.StateOpen {
+		t.Errorf("half of ten attempts failed: breaker %s, want open", got)
 	}
 }

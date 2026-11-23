@@ -1,7 +1,7 @@
 # 36. Closing: the diagram and a final review
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: 1ce0e7f
 
 ## Goal
 

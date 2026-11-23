@@ -23,7 +23,9 @@
 //	RETRY_BASE           the first retry's ceiling, doubled each attempt (default 10s)
 //	RETRY_CAP            the highest ceiling (default 15m)
 //	MAX_ATTEMPTS         attempts before a notification fails (default 8)
-//	BREAKER_FAILURES     transient failures in a row that open a channel's breaker (default 5)
+//	BREAKER_MIN_REQUESTS     sends in the window before a channel's breaker may open (default 20)
+//	BREAKER_FAILURE_PERCENT  the share of them failed for now that opens it (default 50)
+//	BREAKER_WINDOW           the rolling window they are counted over (default 10s)
 //	BREAKER_OPEN         how long it stays open before a probe (default 30s)
 //	RELAY_POLL_INTERVAL  the relay's fallback poll when no notification wakes it (default 5s)
 //	SCHEDULER_INTERVAL   how often due work is queued and lost work reaped (default 1s)
@@ -126,7 +128,9 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 		Base: cfg.Duration("RETRY_BASE", 10*time.Second), Cap: cfg.Duration("RETRY_CAP", 15*time.Minute),
 		MaxAttempts: cfg.Int("MAX_ATTEMPTS", 8),
 	}
-	breakerFailures := cfg.Int("BREAKER_FAILURES", 5)
+	breakerMinRequests := cfg.Int("BREAKER_MIN_REQUESTS", 20)
+	breakerFailurePercent := cfg.Int("BREAKER_FAILURE_PERCENT", 50)
+	breakerWindow := cfg.Duration("BREAKER_WINDOW", 10*time.Second)
 	breakerOpen := cfg.Duration("BREAKER_OPEN", 30*time.Second)
 	pollInterval := cfg.Duration("RELAY_POLL_INTERVAL", 5*time.Second)
 	schedulerInterval := cfg.Duration("SCHEDULER_INTERVAL", time.Second)
@@ -225,7 +229,8 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 		consumer := delivery.NewConsumer(store, client, delivery.ConsumerConfig{
 			Channel: notification.Channel(q.RoutingKey), Concurrency: concurrency, RatePerSecond: float64(ratePerSecond),
 			Lease: providerTimeout + leaseMargin, Policy: policy, ShutdownTimeout: shutdownTimeout,
-			BreakerFailures: breakerFailures, BreakerOpen: breakerOpen,
+			BreakerMinRequests: breakerMinRequests, BreakerFailurePercent: breakerFailurePercent,
+			BreakerWindow: breakerWindow, BreakerOpen: breakerOpen,
 		}, deliveryMetrics, log)
 		g.Go(func() error { return consumer.Run(gctx, deliveries) })
 	}

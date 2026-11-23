@@ -360,3 +360,53 @@ func TestLoopsCountWhatTheyMove(t *testing.T) {
 		t.Errorf("queued = %v, want the one due", got)
 	}
 }
+
+// TestRetriesArePublishedAtTheLowestPriority (ADR 0036): a notification queued again after a failed attempt goes
+// behind every fresh one, whatever its own priority, so failing retries cannot hold healthy notifications back; a
+// retry by hand, which gives the attempts back, is published at the notification's own priority again.
+func TestRetriesArePublishedAtTheLowestPriority(t *testing.T) {
+	t.Parallel()
+	store, pool := newStore(t)
+	conn, top := newBroker(t)
+	retried := create(t, store, notification.ChannelSMS, "+905551234567", notification.PriorityHigh)
+	byHand := create(t, store, notification.ChannelSMS, "+905551234568", notification.PriorityHigh)
+	// Their first publish is not this test's concern.
+	if _, err := pool.Exec(t.Context(), "DELETE FROM outbox"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'retrying', attempts = 1, next_attempt_at = now() - interval '1 second' WHERE id = $1", retried.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', attempts = 8, failed_at = now(), failure_reason = 'attempts_exhausted' WHERE id = $1", byHand.ID); err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := store.QueueDue(t.Context(), 10); err != nil || queued != 1 {
+		t.Fatalf("QueueDue = %d, %v", queued, err)
+	}
+	if _, err := store.Retry(t.Context(), byHand.ID); err != nil {
+		t.Fatal(err)
+	}
+	startRelay(t, store, conn, top, time.Second)
+
+	ch, err := conn.Channel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ch.Close() }()
+	deliveries, err := rabbitmq.Consume(ch, top.Queues[0].Name, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priority := map[string]uint8{}
+	for range 2 {
+		select {
+		case d := <-deliveries:
+			priority[d.MessageId] = d.Priority
+		case <-time.After(10 * time.Second):
+			t.Fatal("the two messages were not published")
+		}
+	}
+	if priority[retried.ID.String()] != 0 || priority[byHand.ID.String()] != notification.PriorityHigh.Rank() {
+		t.Errorf("priorities = %v; want the automatic retry at 0 and the retry by hand at %d", priority, notification.PriorityHigh.Rank())
+	}
+}

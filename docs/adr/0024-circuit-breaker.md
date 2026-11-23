@@ -19,7 +19,7 @@ handling the breaker is asked, and what happens to a notification already claime
 ## Decision
 
 - **`sony/gobreaker/v2`'s two-step breaker**, one per consumer and so per channel: `MaxRequests` 1, `Timeout`
-  `BreakerOpen`, tripping on `BreakerFailures` consecutive failures. A send reports its outcome after it ends:
+  `BreakerOpen`, tripping on consecutive failures (a failure ratio since [ADR 0036](0036-retries-and-the-breaker-under-load.md)). A send reports its outcome after it ends:
   success closes or keeps closed, a transient failure other than `429` counts, and a permanent rejection, an alert or
   a `429` is excluded (`IsExcluded`), counting for neither side.
 - **The loop follows the breaker's state** for how many sends may be in flight: the concurrency while closed, the one

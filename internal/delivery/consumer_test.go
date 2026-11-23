@@ -121,7 +121,8 @@ func (s fakeSender) Send(context.Context, notification.Notification) Outcome {
 func testConfig() ConsumerConfig {
 	return ConsumerConfig{
 		Channel: notification.ChannelSMS, Concurrency: 4, RatePerSecond: 1000, Lease: time.Minute,
-		Policy: testPolicy, ShutdownTimeout: 5 * time.Second, BreakerFailures: 5, BreakerOpen: time.Minute,
+		Policy: testPolicy, ShutdownTimeout: 5 * time.Second, BreakerMinRequests: 20, BreakerFailurePercent: 50,
+		BreakerWindow: 10 * time.Second, BreakerOpen: time.Minute,
 	}
 }
 

@@ -108,7 +108,7 @@ INSERT INTO outbox (notification_id) SELECT id FROM requeued;
 -- name: ClaimOutbox :many
 -- Takes up to batch_size outbox rows, oldest first, with what publishing them needs, and locks them until the
 -- transaction ends; SKIP LOCKED leaves rows another relay holds.
-SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id, n.trace_parent
+SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id, n.trace_parent, n.attempts
 FROM outbox o
 JOIN notifications n ON n.id = o.notification_id
 ORDER BY o.id

@@ -25,6 +25,9 @@ import (
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
 )
 
+// breakerBuckets is how many buckets the breaker's rolling window has.
+const breakerBuckets = 10
+
 // tracer names the delivery module's spans.
 var tracer = otel.Tracer("github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery")
 
@@ -63,9 +66,12 @@ type ConsumerConfig struct {
 	Policy RetryPolicy
 	// ShutdownTimeout bounds how long stopping waits for the sends in flight.
 	ShutdownTimeout time.Duration
-	// BreakerFailures transient failures in a row open the circuit breaker, for BreakerOpen (ADR 0007).
-	BreakerFailures int
-	BreakerOpen     time.Duration
+	// The circuit breaker opens for BreakerOpen once, over the last BreakerWindow, at least BreakerMinRequests sends
+	// were made and BreakerFailurePercent of them failed for now (ADR 0007, 0036).
+	BreakerMinRequests    int
+	BreakerFailurePercent int
+	BreakerWindow         time.Duration
+	BreakerOpen           time.Duration
 }
 
 // breakerRecheck is how often the loop looks at a breaker that is not closed, to resume once it lets a probe through.
@@ -96,8 +102,9 @@ type Consumer struct {
 // NewConsumer returns a consumer over the given storage and sender. Its limiter has a burst of one, so sends are
 // spaced evenly and no second holds more than RatePerSecond of them, plus the one at its edge.
 //
-// Its circuit breaker opens after BreakerFailures transient failures in a row, stays open for BreakerOpen, then lets
-// one probe through: a success closes it, a failure opens it again.
+// Its circuit breaker opens on a failure ratio over a rolling window, not on failures in a row, which retries queued
+// together would produce while the provider is healthy (ADR 0036). It stays open for BreakerOpen, then lets one probe
+// through: a success closes it, a failure opens it again.
 func NewConsumer(s store, snd sender, cfg ConsumerConfig, metrics *Metrics, log *slog.Logger) *Consumer {
 	log = log.With("channel", cfg.Channel)
 	channel := string(cfg.Channel)
@@ -110,8 +117,14 @@ func NewConsumer(s store, snd sender, cfg ConsumerConfig, metrics *Metrics, log 
 			Name:        string(cfg.Channel),
 			MaxRequests: 1,
 			Timeout:     cfg.BreakerOpen,
-			ReadyToTrip: func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= uint32(cfg.BreakerFailures) }, //nolint:gosec // G115: a small positive setting
-			IsExcluded:  func(err error) bool { return errors.Is(err, errNotCounted) },
+			// A rolling window of ten buckets, so old attempts leave it gradually.
+			Interval:     cfg.BreakerWindow,
+			BucketPeriod: cfg.BreakerWindow / breakerBuckets,
+			ReadyToTrip: func(c gobreaker.Counts) bool {
+				return int(c.Requests) >= cfg.BreakerMinRequests &&
+					int(c.TotalFailures)*100 >= cfg.BreakerFailurePercent*int(c.Requests)
+			},
+			IsExcluded: func(err error) bool { return errors.Is(err, errNotCounted) },
 			OnStateChange: func(_ string, from, to gobreaker.State) {
 				metrics.breakerState.WithLabelValues(channel).Set(breakerValue(to))
 				log.Warn("circuit breaker changed state", "from", from.String(), "to", to.String())

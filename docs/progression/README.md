@@ -48,7 +48,8 @@ finds the commit that finished block NN.
 | [33](33-status-updates.md) | Status updates over WebSocket | 2026-11-24 | `/v1/status-updates` follows notifications and batches, fed by a status trigger | `5389db4` |
 | [34](34-distributed-tracing.md) | Distributed tracing | 2026-11-24 | One OpenTelemetry trace per notification, from the request to its last attempt; Jaeger in Compose | `b566214` |
 | [35](35-dashboards-and-load-tests.md) | Dashboards and load tests | 2026-11-24 | Prometheus and a provisioned Grafana dashboard; two seeded load runs, one of which found a breaker livelock | `5173e8e` |
-| [36](36-closing.md) | Closing: the diagram and a final review | 2026-11-24 | The architecture in D2 and as text in the README; screenshots and a metrics bug fixed; the whole suite, the checks and the documents reviewed | this block's commit |
+| [36](36-closing.md) | Closing: the diagram and a final review | 2026-11-24 | The architecture in D2 and as text in the README; screenshots and a metrics bug fixed; the whole suite, the checks and the documents reviewed | 1ce0e7f |
+| [37](37-retries-and-the-breaker.md) | Retries at the lowest priority; a breaker that opens on a failure ratio | 2026-11-24 | Run 2 repeated: every healthy SMS sent; ADR 0036 | this block's commit |
 
 ## Template
 

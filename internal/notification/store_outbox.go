@@ -19,6 +19,18 @@ type OutboxEntry struct {
 	Priority       Priority
 	CorrelationID  string
 	TraceParent    string // the trace the notification was created in, or ""
+	Attempts       int    // attempts spent: more than none makes this a retry
+}
+
+// QueuePriority is the AMQP priority the entry is published at: its notification's rank, or 0, below every fresh
+// notification, for an automatic retry (ADR 0036). A notification the provider keeps refusing would otherwise come
+// back ahead of healthy ones waiting, and every probe of a half-open circuit breaker would be one of its retries.
+// A retry by hand gives the attempts back, and the notification its own priority.
+func (e OutboxEntry) QueuePriority() uint8 {
+	if e.Attempts > 0 {
+		return 0
+	}
+	return e.Priority.Rank()
 }
 
 // DrainOutbox takes up to limit outbox rows, oldest first, hands them to publish, and deletes them once publish
@@ -42,7 +54,7 @@ func (s *Store) DrainOutbox(ctx context.Context, limit int, publish func(context
 		for i, r := range rows {
 			entries[i] = OutboxEntry{
 				NotificationID: r.NotificationID, Channel: Channel(r.Channel), Priority: Priority(r.Priority),
-				CorrelationID: r.CorrelationID, TraceParent: deref(r.TraceParent),
+				CorrelationID: r.CorrelationID, TraceParent: deref(r.TraceParent), Attempts: r.Attempts,
 			}
 			ids[i] = r.ID
 		}

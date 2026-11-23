@@ -97,7 +97,7 @@ func (r *Relay) drain(ctx context.Context) error {
 // tracer names the dispatch module's spans.
 var tracer = otel.Tracer("github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch")
 
-// publish turns outbox entries into messages: routed by channel, with the priority's rank as AMQP priority, and
+// publish turns outbox entries into messages: routed by channel, with QueuePriority as AMQP priority, and
 // the notification's ID as message ID and body. Each message is published in a span that continues the trace the
 // notification was created in, and carries that span in its headers for the consumer to continue (ADR 0034).
 func (r *Relay) publish(ctx context.Context, entries []notification.OutboxEntry) error {
@@ -118,7 +118,7 @@ func (r *Relay) publish(ctx context.Context, entries []notification.OutboxEntry)
 		observability.Propagator().Inject(spanCtx, headers)
 		msgs[i] = rabbitmq.Message{
 			Exchange: r.cfg.Exchange, RoutingKey: string(e.Channel), ID: e.NotificationID.String(), Body: body,
-			Priority: e.Priority.Rank(), CorrelationID: e.CorrelationID, Headers: headers,
+			Priority: e.QueuePriority(), CorrelationID: e.CorrelationID, Headers: headers,
 		}
 	}
 	err := r.pub.Publish(ctx, msgs...)

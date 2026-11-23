@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -119,9 +120,9 @@ func (l *logLines) has(parts ...string) bool {
 
 // startWorker runs the worker against a database and a virtual host of the test's own and the given provider,
 // and returns a service to create notifications with, as the API does, and the store to inspect them. The worker's
-// log lines are collected in logs when it is not nil. The worker stops when stop is called or the test ends, and
+// log lines are collected in logs when it is not nil; settings, as name and value pairs, change its configuration. The worker stops when stop is called or the test ends, and
 // must stop cleanly.
-func startWorker(t *testing.T, p *provider, logs *logLines) (svc *notification.Service, store *notification.Store, ops string, stop func()) {
+func startWorker(t *testing.T, p *provider, logs *logLines, settings ...string) (svc *notification.Service, store *notification.Store, ops string, stop func()) {
 	t.Helper()
 	srv := httptest.NewServer(p)
 	t.Cleanup(srv.Close)
@@ -140,12 +141,16 @@ func startWorker(t *testing.T, p *provider, logs *logLines) (svc *notification.S
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	out, outW := io.Pipe()
+	vars := map[string]string{
+		"DATABASE_URL": dsn, "AMQP_URL": amqpURL, "PROVIDER_URL": srv.URL,
+		"PROVIDER_TIMEOUT": "2s", "SHUTDOWN_TIMEOUT": "5s", "MAX_ATTEMPTS": "2", "RETRY_BASE": "50ms",
+		"SCHEDULER_INTERVAL": "50ms", "RELAY_POLL_INTERVAL": "1s", "OPS_ADDR": "127.0.0.1:0",
+	}
+	for i := 0; i+1 < len(settings); i += 2 {
+		vars[settings[i]] = settings[i+1]
+	}
 	go func() {
-		done <- run(ctx, nil, env(map[string]string{
-			"DATABASE_URL": dsn, "AMQP_URL": amqpURL, "PROVIDER_URL": srv.URL,
-			"PROVIDER_TIMEOUT": "2s", "SHUTDOWN_TIMEOUT": "5s", "MAX_ATTEMPTS": "2", "RETRY_BASE": "50ms",
-			"SCHEDULER_INTERVAL": "50ms", "RELAY_POLL_INTERVAL": "1s", "OPS_ADDR": "127.0.0.1:0",
-		}), outW)
+		done <- run(ctx, nil, env(vars), outW)
 		_ = outW.Close()
 	}()
 	// The "worker started" line carries the operations server's address; reading goes on so logging never blocks.
@@ -370,5 +375,52 @@ func TestWorkerSendsAScheduledNotificationWhenItsTimeComes(t *testing.T) {
 	sent := waitForStatus(t, store, n.ID, notification.StatusSent)
 	if sent.UpdatedAt.Before(at) {
 		t.Errorf("sent at %v, before its time %v", sent.UpdatedAt, at)
+	}
+}
+
+// TestHealthySendsAreNotHeldBehindFailingRetries reproduces block 35's livelock (ADR 0036): high-priority
+// notifications the provider keeps refusing are retried, and their retries must not keep the channel's breaker open
+// or come before the healthy notifications waiting. Before the fix every half-open probe was such a retry, and the
+// healthy ones waited for every failing one to spend its attempts.
+func TestHealthySendsAreNotHeldBehindFailingRetries(t *testing.T) {
+	const failing, healthy = 20, 200
+	p := &provider{calls: map[string]int{}, keys: map[string]string{}, answer: func(to string) int {
+		if to == "+905550000503" {
+			return http.StatusServiceUnavailable
+		}
+		return http.StatusAccepted
+	}}
+	svc, store, _, _ := startWorker(t, p, nil, "MAX_ATTEMPTS", "8", "BREAKER_OPEN", "500ms")
+
+	var drafts []notification.Draft
+	for range failing {
+		drafts = append(drafts, notification.Draft{To: "+905550000503", Channel: notification.ChannelSMS,
+			Content: "refused", Priority: notification.PriorityHigh})
+	}
+	for i := range healthy {
+		drafts = append(drafts, notification.Draft{To: fmt.Sprintf("+9055512%05d", i), Channel: notification.ChannelSMS,
+			Content: "healthy", Priority: notification.PriorityNormal})
+	}
+	b, _, err := svc.CreateBatch(t.Context(), drafts, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 200 sends at 100 a second take two seconds; ten leave room for the breaker to open once and close.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		sent := 0
+		for _, item := range b.Items[failing:] {
+			if n, err := store.Get(t.Context(), item.ID); err == nil && n.Status == notification.StatusSent {
+				sent++
+			}
+		}
+		if sent == healthy {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d healthy notifications sent after 10 s; the failing retries held the rest", sent, healthy)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

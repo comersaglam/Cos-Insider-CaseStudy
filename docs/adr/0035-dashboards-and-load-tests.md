@@ -44,8 +44,9 @@ scaled it down to one or two small seeded runs that show the service can be meas
   high-priority SMS had been sent first, and a retried high-priority message outranks the healthy normal and low
   ones waiting. Each probe fails, the breaker reopens for 30 seconds, and 968 healthy SMS waited behind 51 failing
   ones. With up to eight attempts each, one per 30 seconds, it would take hours to clear. The tests had not found it:
-  they never combine priorities, retries and the breaker under load. The fix changes ADR 0024's breaker or ADR
-  0007's retries, so it waits for the owner's decision.
+  they never combine priorities, retries and the breaker under load. Fixed by
+  [ADR 0036](0036-retries-and-the-breaker-under-load.md): retries at the lowest priority, and a breaker that opens on
+  a failure ratio.
 
 ### Deliberately not done
 

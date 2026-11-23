@@ -272,13 +272,14 @@ peak, where the rate limit holds them; the limiter spaces sends 10 ms apart.
 
 ![A burst of 6000 notifications draining at 100 a second per channel](docs/images/load-burst.png)
 
-**A burst with failing recipients found a livelock**: the retries of the SMS the provider keeps refusing open the
-channel's circuit breaker, and since they outrank the healthy SMS still waiting, every half-open probe is one of
-them, so the breaker keeps reopening and the healthy SMS wait: 94.6% of the run's attempts succeed, then SMS stops.
-E-mail and push are not affected. The fix changes the
-breaker or the retries' priority, and waits for a decision ([ADR 0035](docs/adr/0035-dashboards-and-load-tests.md)).
+**A burst with failing recipients** (`N=3000 SEED=2 UNAVAILABLE=0.15 REJECTED=0.05`) first found a livelock: the
+retries of the SMS the provider kept refusing opened the channel's breaker and, outranking the healthy SMS, were every
+half-open probe, so 968 healthy SMS waited. Retries now go at the lowest priority and the breaker opens on a failure
+ratio ([ADR 0036](docs/adr/0036-retries-and-the-breaker-under-load.md)): every healthy SMS is sent, as fast as e-mail
+and push drain, and the breaker opens only once the refused recipient's retries are all that is left; they wait, 243,
+without spending attempts.
 
-![The SMS breaker staying open while its queue stops draining](docs/images/load-breaker-livelock.png)
+![SMS draining with failing recipients; the breaker opens only after the healthy traffic](docs/images/load-failing-recipients.png)
 
 One notification answered 503, followed in Jaeger from the API's request to each retry:
 
@@ -298,7 +299,8 @@ Both processes read environment variables; Compose sets them, and `.env` overrid
 | `SEND_CONCURRENCY` | worker | `32` | sends in flight per channel |
 | `MAX_ATTEMPTS` | worker | `8` | attempts before a notification fails |
 | `RETRY_BASE`, `RETRY_CAP` | worker | `10s`, `15m` | the first retry's ceiling, doubled each attempt, and the highest |
-| `BREAKER_FAILURES`, `BREAKER_OPEN` | worker | `5`, `30s` | failures in a row that open a channel's breaker, and how long it stays open |
+| `BREAKER_MIN_REQUESTS`, `BREAKER_FAILURE_PERCENT`, `BREAKER_WINDOW` | worker | `20`, `50`, `10s` | a channel's breaker opens once, over the window, that many sends were made and that share of them failed |
+| `BREAKER_OPEN` | worker | `30s` | how long the breaker stays open before a probe |
 | `HTTP_ADDR`, `OPS_ADDR` | api, worker | `:8080`, `:9090` | where each process listens |
 | `LOG_LEVEL` | both | `info` | `debug`, `info`, `warn` or `error` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | both | unset | where spans are exported over OTLP/HTTP; unset, none are |

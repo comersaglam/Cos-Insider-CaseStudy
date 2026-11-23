@@ -43,6 +43,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0033](0033-status-updates-over-websocket.md) | Status updates over WebSocket | Accepted |
 | [0034](0034-distributed-tracing.md) | Distributed tracing | Accepted |
 | [0035](0035-dashboards-and-load-tests.md) | Dashboards and load tests | Accepted |
+| [0036](0036-retries-and-the-breaker-under-load.md) | Retries and the breaker under load | Accepted |
 
 ## Template
 
