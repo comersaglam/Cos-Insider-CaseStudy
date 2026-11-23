@@ -1,7 +1,7 @@
 # 31. Scheduled notifications
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `b7813f9`
 - Decisions: [ADR 0031](../adr/0031-scheduled-notifications.md)
 
 ## Goal

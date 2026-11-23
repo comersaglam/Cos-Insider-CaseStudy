@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 	"uuid"
 
@@ -23,6 +24,11 @@ type store interface {
 	CountFailed(ctx context.Context, f RetryFilter) (int, error)
 	RequeueFailed(ctx context.Context, f RetryFilter, maxRows int) (int, error)
 	Summary(ctx context.Context, window time.Duration) (Summary, error)
+	CreateTemplate(ctx context.Context, t Template) (Template, error)
+	Template(ctx context.Context, id uuid.UUID) (Template, error)
+	ListTemplates(ctx context.Context, after *Cursor, limit int) ([]Template, error)
+	UpdateTemplate(ctx context.Context, t Template) (Template, error)
+	DeleteTemplate(ctx context.Context, id uuid.UUID) error
 }
 
 // Service holds the notification use cases. It knows the rules; it neither reads requests nor writes SQL.
@@ -41,7 +47,12 @@ func NewService(s store, log *slog.Logger) *Service {
 // the same key with a different request is refused with ErrIdempotencyKeyReused. An invalid draft is refused with
 // a *ValidationError and nothing is stored.
 func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n Notification, created bool, err error) {
+	// The fingerprint is of the request as written, before a template fills it in.
+	fingerprint := d.Fingerprint()
 	now := time.Now()
+	if d, err = s.render(ctx, d, nil); err != nil {
+		return Notification{}, false, err
+	}
 	if err := d.Validate(now); err != nil {
 		return Notification{}, false, err
 	}
@@ -49,7 +60,7 @@ func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n
 	correlationID := correlationIDOf(ctx)
 	var idem IdempotencyKey
 	if idempotencyKey != "" {
-		idem = IdempotencyKey{Key: idempotencyKey, Fingerprint: d.Fingerprint()}
+		idem = IdempotencyKey{Key: idempotencyKey, Fingerprint: fingerprint}
 	}
 
 	n, created, err = s.store.Create(ctx, Notification{
@@ -60,6 +71,7 @@ func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n
 		Priority:      d.Priority,
 		Status:        d.Status(now),
 		ScheduledAt:   d.ScheduledAt,
+		TemplateID:    d.TemplateID,
 		CorrelationID: correlationID,
 	}, idem)
 	if err != nil {
@@ -93,8 +105,14 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 	correlationID := correlationIDOf(ctx)
 	nb := NewBatch{ID: uuid.NewV7(), Total: len(drafts), CorrelationID: correlationID}
 	now := time.Now()
+	// A batch reads each template it names once, however many items use it.
+	templates := map[uuid.UUID]Template{}
 	for i, d := range drafts {
-		if err := d.Validate(now); err != nil {
+		d, err := s.render(ctx, d, templates)
+		if err == nil {
+			err = d.Validate(now)
+		}
+		if err != nil {
 			verr, ok := errors.AsType[*ValidationError](err)
 			if !ok {
 				return Batch{}, false, err
@@ -104,7 +122,7 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 		}
 		nb.Items = append(nb.Items, NewBatchItem{Index: i, Notification: Notification{
 			ID: uuid.NewV7(), To: d.To, Channel: d.Channel, Content: d.Content, Priority: d.Priority,
-			Status: d.Status(now), ScheduledAt: d.ScheduledAt, CorrelationID: correlationID,
+			Status: d.Status(now), ScheduledAt: d.ScheduledAt, TemplateID: d.TemplateID, CorrelationID: correlationID,
 		}})
 	}
 	if len(nb.Items) == 0 {
@@ -141,4 +159,50 @@ func correlationIDOf(ctx context.Context) string {
 // Summary returns what waits now and how sending went over the last SummaryWindow (ADR 0026).
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	return s.store.Summary(ctx, SummaryWindow)
+}
+
+// render fills d's channel and content from the template it names, when it names one (ADR 0032). A template that
+// does not exist or lacks a variable, and content written beside a template, are refused with a *ValidationError;
+// the rendered content is checked afterwards, as written content is. templates, when not nil, keeps the templates
+// read, so a batch reads each once.
+func (s *Service) render(ctx context.Context, d Draft, templates map[uuid.UUID]Template) (Draft, error) {
+	refuse := func(field string, code Code, message string) (Draft, error) {
+		return Draft{}, &ValidationError{Fields: []FieldError{{Field: field, Code: code, Message: message}}}
+	}
+	if d.TemplateID == nil {
+		if len(d.Variables) > 0 {
+			return refuse("variables", CodeInvalid, "are given only with a templateId")
+		}
+		return d, nil
+	}
+	if d.Content != "" {
+		return refuse("content", CodeInvalid, "must be left out with a templateId: the template writes it")
+	}
+
+	t, ok := templates[*d.TemplateID]
+	if !ok {
+		var err error
+		t, err = s.store.Template(ctx, *d.TemplateID)
+		if errors.Is(err, ErrNotFound) {
+			return refuse("templateId", CodeInvalid, "no template has this ID")
+		}
+		if err != nil {
+			return Draft{}, err
+		}
+		if templates != nil {
+			templates[t.ID] = t
+		}
+	}
+	if d.Channel != "" && d.Channel != t.Channel {
+		return refuse("channel", CodeInvalid, "must be the template's channel, "+string(t.Channel)+", or be left out")
+	}
+	content, err := t.Render(d.Variables)
+	if missing, ok := errors.AsType[*MissingVariablesError](err); ok {
+		return refuse("variables", CodeRequired, "the template needs "+strings.Join(missing.Names, ", "))
+	}
+	if err != nil {
+		return Draft{}, err
+	}
+	d.Channel, d.Content = t.Channel, content
+	return d, nil
 }

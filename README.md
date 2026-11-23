@@ -3,8 +3,8 @@
 [![CI](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml/badge.svg)](https://github.com/comersaglam/Cos-Insider-CaseStudy/actions/workflows/ci.yml)
 
 A Go service that accepts notifications through an HTTP API and delivers them over SMS, e-mail and push through an
-external provider: queue workers, a per-channel rate limit, priorities, scheduling, retries with backoff, a circuit
-breaker, idempotency, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
+external provider: queue workers, a per-channel rate limit, priorities, scheduling, templates, retries with backoff,
+a circuit breaker, idempotency, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
 the brief is restated in [docs/requirements.md](docs/requirements.md).
 
 ## Quick start
@@ -99,6 +99,12 @@ curl -s -X POST localhost:8080/v1/batches -H 'Content-Type: application/json' -d
   {"to":"05551234567","channel":"sms","content":"Flash sale: 40% off until midnight."},
   {"to":"ayse@example.com","channel":"email","content":"Flash sale: 40% off until midnight.","priority":"high"}]}'
 
+# A template, then a notification rendered from it: only text and {{.name}} placeholders are allowed.
+curl -s -X POST localhost:8080/v1/templates -H 'Content-Type: application/json' \
+  -d '{"name":"order-shipped","channel":"sms","body":"Hi {{.name}}, your order {{.order}} has shipped."}'
+curl -s -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' \
+  -d '{"to":"+905551234567","templateId":"<template id>","variables":{"name":"Ayşe","order":"42"}}'
+
 # A batch's progress: its notifications counted by status.
 curl -s localhost:8080/v1/batches/<batch id>
 
@@ -170,6 +176,7 @@ modular monolith: packages by feature under `internal/`, infrastructure under `i
 | Priority queues | RabbitMQ priority queues; high before normal before low within a channel |
 | Content validation | per-channel recipient format and length limits, every invalid field reported |
 | Scheduled notifications (bonus) | `scheduledAt`, up to 30 days ahead; waits in PostgreSQL and is queued when due |
+| Templates (bonus) | `/v1/templates` with `{{.name}}` placeholders, rendered when a notification is created |
 | Idempotency | `Idempotency-Key` on create and batch; the notification's ID sent to the provider; claims under a lease |
 | Retries | exponential backoff with full jitter, `Retry-After` honoured, a circuit breaker per channel, single and bulk retry by hand |
 | Real-time metrics | `/v1/metrics` (queue depth, success rate, latency percentiles) and Prometheus `/metrics` on both processes |
@@ -214,7 +221,7 @@ Every setting is listed in the package comments of [cmd/api](cmd/api/main.go) an
 ```
 api/                  the OpenAPI contract, embedded; api/contract checks answers against it in tests
 cmd/api, cmd/worker   the two composition roots
-internal/notification the domain, its use cases, HTTP handlers and storage
+internal/notification notifications and their templates: the domain, use cases, HTTP handlers and storage
 internal/dispatch     the outbox relay and the scheduler
 internal/delivery     the consumer, the provider client, retries and the circuit breaker
 internal/health       liveness and readiness
@@ -237,5 +244,4 @@ verification and commits, and [docs/roadmap.md](docs/roadmap.md) holds the plan.
 - **Authentication**: the brief does not ask for it; it would sit in a gateway in front, or in one middleware.
 - **Exactly-once delivery**: not possible with a provider that is called over HTTP; delivery is at least once, and
   the provider receives an idempotency key to drop repeats.
-- **Templates, WebSocket updates and tracing** are the brief's optional bonuses, planned in the
-  [roadmap](docs/roadmap.md).
+- **WebSocket updates and tracing** are the brief's optional bonuses, planned in the [roadmap](docs/roadmap.md).

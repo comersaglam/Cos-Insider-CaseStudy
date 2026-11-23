@@ -11,7 +11,8 @@ info:
     ## How a notification travels
 
     1. `POST /v1/notifications` (or a batch) validates it, stores it as `queued` and answers `202 Accepted` at once.
-       With a `scheduledAt` ahead, it is stored as `scheduled` instead, and queued when that time comes.
+       With a `scheduledAt` ahead, it is stored as `scheduled` instead, and queued when that time comes. With a
+       `templateId`, its content is rendered from the template there and then, and kept.
     2. A worker takes it from its channel's queue, higher `priority` first, at most 100 sends a second per channel
        by default, and sends `{to, channel, content}` to the provider. The provider also receives `Idempotency-Key` (the
        notification's ID) and `X-Correlation-ID`.
@@ -58,6 +59,7 @@ info:
     | `method_not_allowed` | 405 | The path exists but does not accept this method. |
     | `not_cancellable` | 409 | The notification is being sent or is finished. |
     | `not_retryable` | 409 | The notification is not failed. |
+    | `template_name_taken` | 409 | Another template has this name. |
     | `body_too_large` | 413 | The body is larger than the operation allows. |
     | `unsupported_media_type` | 415 | The body is not sent as `application/json`. |
     | `validation_failed` | 422 | The request breaks a rule; `errors` locates each one by JSON Pointer. |
@@ -76,6 +78,7 @@ info:
     | Batch | 1 to 1,000 items, body up to 10 MiB |
     | Bulk retry | 10,000 notifications per request; body up to 4 KiB |
     | Schedule | up to 30 days ahead |
+    | Template | a name of up to 64 characters; a body within its channel's content limit, of text and `{{.name}}` placeholders |
     | List page | 1 to 100 items, 50 by default |
   contact:
     name: Source and decisions
@@ -91,6 +94,8 @@ tags:
     description: Create, read, list, cancel and retry single notifications.
   - name: Batches
     description: Accept up to 1,000 notifications in one request, and follow them.
+  - name: Templates
+    description: Bodies with `{{.name}}` placeholders that notifications are rendered from.
   - name: Metrics
     description: The service's state, for people and for Prometheus.
   - name: Operations
@@ -114,6 +119,11 @@ paths:
         With a `scheduledAt` in the future, up to 30 days ahead, the notification is stored as `scheduled` and waits
         until then; a time that has already come sends it at once, so a client's clock running a little behind does
         not fail the request. A scheduled notification can be cancelled until its time.
+
+        Instead of `channel` and `content`, a notification can name a template with `templateId` and give its
+        `variables`: the content is rendered now and stored, so a later change to the template does not touch it.
+        `channel` may be left out, and if given must be the template's. Every variable the template needs must be
+        given; the rendered content is then checked as written content is.
 
         With an `Idempotency-Key`, repeating the request returns the first notification as it is now, marked
         `Idempotent-Replayed: true`, however much later it is repeated. The same key with a different request is
@@ -140,6 +150,9 @@ paths:
               scheduled:
                 summary: An SMS sent at 09:00 Istanbul time
                 value: { to: '+905551234567', channel: sms, content: 'Flash sale: 40% off until midnight.', scheduledAt: '2026-11-24T09:00:00+03:00' }
+              fromTemplate:
+                summary: An SMS rendered from a template
+                value: { to: '+905551234567', templateId: 01a20a42-d679-721d-86d1-2ddc1c0d20f2, variables: { name: Ayşe, order: '42' } }
       responses:
         '202':
           description: Accepted for sending, or a repeat of an accepted request.
@@ -196,6 +209,20 @@ paths:
                     attempts: 0
                     createdAt: '2026-11-23T20:53:34.669613Z'
                     updatedAt: '2026-11-23T20:53:34.669613Z'
+                fromTemplate:
+                  summary: Rendered from a template, which it names
+                  value:
+                    id: 01a20a42-d6b3-7b30-94c4-60631e296721
+                    to: '+905551234567'
+                    channel: sms
+                    content: Hi Ayşe, your order 42 has shipped.
+                    priority: normal
+                    status: queued
+                    correlationId: req-7f3c9a
+                    templateId: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
+                    attempts: 0
+                    createdAt: '2026-11-23T21:14:42.227755Z'
+                    updatedAt: '2026-11-23T21:14:42.227755Z'
         '400':
           $ref: '#/components/responses/BadRequest'
         '413':
@@ -204,8 +231,9 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '422':
           description: >-
-            The notification breaks a rule (`validation_failed`, with `errors` locating each one, `scheduledAt` more
-            than 30 days ahead included), or the idempotency key was used for a different request
+            The notification breaks a rule (`validation_failed`, with `errors` locating each one: `scheduledAt` more
+            than 30 days ahead, a `templateId` no template has, a variable the template needs, and, with a template,
+            `/content` for the rendered content), or the idempotency key was used for a different request
             (`idempotency_key_reused`).
           headers:
             X-Correlation-ID:
@@ -238,6 +266,28 @@ paths:
                     correlationId: req-7f3c9a
                     errors:
                       - { pointer: /scheduledAt, code: invalid, detail: must be at most 30 days ahead }
+                missingVariable:
+                  summary: The template needs a variable that is not given
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: the request is invalid
+                    code: validation_failed
+                    correlationId: req-7f3c9a
+                    errors:
+                      - { pointer: /variables, code: required, detail: the template needs order }
+                unknownTemplate:
+                  summary: No template has this ID
+                  value:
+                    type: about:blank
+                    title: Unprocessable Entity
+                    status: 422
+                    detail: the request is invalid
+                    code: validation_failed
+                    correlationId: req-7f3c9a
+                    errors:
+                      - { pointer: /templateId, code: invalid, detail: no template has this ID }
                 idempotencyKeyReused:
                   summary: The key belongs to another request
                   value:
@@ -745,6 +795,215 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /v1/templates:
+    post:
+      tags: [Templates]
+      operationId: createTemplate
+      summary: Create a template
+      description: |
+        A template is a body with `{{.name}}` placeholders for one channel. A notification created with its
+        `templateId` and `variables` gets its content rendered from it, then and there (ADR 0032). The body may hold
+        only text and placeholders, and must fit the channel's content limit; the answer lists the variables it
+        needs.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateRequest'
+            example: { name: order-shipped, channel: sms, body: 'Hi {{.name}}, your order {{.order}} has shipped.' }
+      responses:
+        '201':
+          description: The template, created.
+          headers:
+            Location:
+              description: The template's URL.
+              schema: { type: string, example: /v1/templates/01a20a42-d679-721d-86d1-2ddc1c0d20f2 }
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+              example:
+                id: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
+                name: order-shipped
+                channel: sms
+                body: Hi {{.name}}, your order {{.order}} has shipped.
+                variables: [name, order]
+                createdAt: '2026-11-23T21:14:42.172224Z'
+                updatedAt: '2026-11-23T21:14:42.172224Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/TemplateNameTaken'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/InvalidTemplate'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      tags: [Templates]
+      operationId: listTemplates
+      summary: List templates, newest first, a page at a time
+      parameters:
+        - name: limit
+          in: query
+          description: How many templates a page holds at most.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          description: The `nextCursor` of the previous page; leave it out for the first page.
+          schema: { type: string }
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: A page of templates.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplatePage'
+              example:
+                items:
+                  - id: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
+                    name: order-shipped
+                    channel: sms
+                    body: Hi {{.name}}, your order {{.order}} has shipped.
+                    variables: [name, order]
+                    createdAt: '2026-11-23T21:14:42.172224Z'
+                    updatedAt: '2026-11-23T21:14:42.172224Z'
+        '400':
+          description: A parameter is unknown or malformed (`invalid_query`, with `errors` naming each `parameter`).
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: about:blank
+                title: Bad Request
+                status: 400
+                detail: the query is invalid
+                code: invalid_query
+                correlationId: req-7f3c9a
+                errors:
+                  - { parameter: channel, code: invalid, detail: is not a parameter of this list }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/templates/{id}:
+    get:
+      tags: [Templates]
+      operationId: getTemplate
+      summary: Read a template
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The template.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+              example:
+                id: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
+                name: order-shipped
+                channel: sms
+                body: Hi {{.name}}, your order {{.order}} has shipped.
+                variables: [name, order]
+                createdAt: '2026-11-23T21:14:42.172224Z'
+                updatedAt: '2026-11-23T21:14:42.172224Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Templates]
+      operationId: replaceTemplate
+      summary: Replace a template
+      description: |
+        Replaces the whole template: name, channel and body. Notifications already created from it keep the content
+        they were rendered with; the next ones are rendered from the new body.
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+        - $ref: '#/components/parameters/CorrelationID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateRequest'
+            example: { name: order-shipped, channel: sms, body: 'Order {{.order}} is on its way, {{.name}}.' }
+      responses:
+        '200':
+          description: The template, replaced.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+              example:
+                id: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
+                name: order-shipped
+                channel: sms
+                body: Order {{.order}} is on its way, {{.name}}.
+                variables: [order, name]
+                createdAt: '2026-11-23T21:14:42.172224Z'
+                updatedAt: '2026-11-23T21:14:42.284755Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/TemplateNameTaken'
+        '413':
+          $ref: '#/components/responses/BodyTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/InvalidTemplate'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Templates]
+      operationId: deleteTemplate
+      summary: Delete a template
+      description: |
+        Notifications created from it keep their content and its `templateId`; a new notification can no longer
+        name it.
+      parameters:
+        - $ref: '#/components/parameters/TemplateID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '204':
+          description: Deleted.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /v1/metrics:
     get:
       tags: [Metrics]
@@ -938,6 +1197,13 @@ components:
       description: The batch's ID. One that is not a UUID is answered as not found.
       schema: { type: string, format: uuid }
       example: 01a20a15-afcd-7655-b81f-dc19ac56238f
+    TemplateID:
+      name: id
+      in: path
+      required: true
+      description: The template's ID. One that is not a UUID is answered as not found.
+      schema: { type: string, format: uuid }
+      example: 01a20a42-d679-721d-86d1-2ddc1c0d20f2
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1056,6 +1322,41 @@ components:
             detail: nothing has this ID
             code: not_found
             correlationId: req-7f3c9a
+    TemplateNameTaken:
+      description: Another template has this name (`template_name_taken`).
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            detail: another template has this name
+            code: template_name_taken
+            correlationId: req-7f3c9a
+    InvalidTemplate:
+      description: The template breaks a rule (`validation_failed`, with `errors` locating each one).
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationID'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Unprocessable Entity
+            status: 422
+            detail: the request is invalid
+            code: validation_failed
+            correlationId: req-7f3c9a
+            errors:
+              - { pointer: /name, code: invalid, detail: 'must be lower-case letters and digits in words joined by hyphens, such as order-shipped' }
+              - { pointer: /body, code: invalid, detail: 'may hold only text and {{.name}} placeholders' }
     InternalError:
       description: >-
         Something failed on the server (`internal_error`). The answer reveals nothing of it; the logs hold it under
@@ -1096,8 +1397,21 @@ components:
     CreateNotificationRequest:
       type: object
       additionalProperties: false
-      required: [to, channel, content]
-      description: The notification to send; the members are the provider's, and priority orders the queue.
+      required: [to]
+      description: |
+        The notification to send, written out (`channel` and `content`, the provider's members) or from a template
+        (`templateId` and `variables`, `channel` optional). `priority` orders the queue and `scheduledAt` delays it.
+      oneOf:
+        - title: written out
+          required: [channel, content]
+          not:
+            anyOf:
+              - required: [templateId]
+              - required: [variables]
+        - title: from a template
+          required: [templateId]
+          not:
+            required: [content]
       properties:
         to:
           type: string
@@ -1119,6 +1433,15 @@ components:
           description: >-
             When to send it (RFC 3339, with its offset), up to 30 days ahead; left out, or already come, it is sent at
             once. A malformed time refuses the request (`invalid_json`). It is not sent to the provider.
+        templateId:
+          type: string
+          format: uuid
+          description: The template to render the content from, instead of writing `content`.
+        variables:
+          type: object
+          additionalProperties: { type: string }
+          description: The template's variables by name; every one the template needs must be given, others are ignored.
+          example: { name: Ayşe, order: '42' }
       allOf:
         - if: { properties: { channel: { const: sms } } }
           then:
@@ -1152,6 +1475,10 @@ components:
           type: string
           format: date-time
           description: The time it was scheduled for (UTC), when it was scheduled; it stays once the notification is queued.
+        templateId:
+          type: string
+          format: uuid
+          description: The template it was rendered from, when it was; kept after the template is changed or deleted.
         failedAt: { type: string, format: date-time, description: 'When it failed, while it is failed (UTC).' }
         attempts:
           type: integer
@@ -1229,6 +1556,11 @@ components:
         content: { type: string, description: 'The message.' }
         priority: { type: string, description: '`high`, `normal` or `low`; `normal` when left out.' }
         scheduledAt: { type: string, format: date-time, description: 'When to send it, as in a single create.' }
+        templateId: { type: string, format: uuid, description: 'The template to render it from, as in a single create.' }
+        variables:
+          type: object
+          additionalProperties: { type: string }
+          description: The template's variables; a batch reads each template it names once.
 
     Batch:
       type: object
@@ -1266,6 +1598,62 @@ components:
                 items: { $ref: '#/components/schemas/FieldProblem' }
         correlationId: { type: string, description: 'The correlation ID of the request that created it.' }
         createdAt: { type: string, format: date-time, description: 'When it was accepted (UTC).' }
+
+    TemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, channel, body]
+      description: A whole template, to create one or to replace one.
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: Unique; lower-case letters and digits in words joined by hyphens.
+          example: order-shipped
+        channel: { $ref: '#/components/schemas/Channel' }
+        body:
+          type: string
+          minLength: 1
+          description: |
+            The content, with `{{.name}}` placeholders for the variables. Only text and placeholders are allowed:
+            no conditions, loops, functions or variables, which would make rendering slow or surprising. It must
+            fit the channel's content limit.
+          example: Hi {{.name}}, your order {{.order}} has shipped.
+      allOf:
+        - if: { properties: { channel: { const: sms } } }
+          then: { properties: { body: { maxLength: 1600 } } }
+        - if: { properties: { channel: { const: email } } }
+          then: { properties: { body: { maxLength: 100000 } } }
+        - if: { properties: { channel: { const: push } } }
+          then: { properties: { body: { maxLength: 1000 } } }
+
+    Template:
+      type: object
+      required: [id, name, channel, body, variables, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid, description: 'A version 7 UUID.' }
+        name: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        body: { type: string }
+        variables:
+          type: array
+          items: { type: string }
+          description: The placeholders' names, each once, in order of first use; a notification must give them all.
+        createdAt: { type: string, format: date-time, description: 'UTC' }
+        updatedAt: { type: string, format: date-time, description: 'When it last changed (UTC).' }
+
+    TemplatePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Newest first.
+          items: { $ref: '#/components/schemas/Template' }
+        nextCursor:
+          type: string
+          description: Absent on the last page; pass it as `cursor` for the next one.
 
     MetricsSummary:
       type: object
@@ -1338,6 +1726,7 @@ components:
             - method_not_allowed
             - not_cancellable
             - not_retryable
+            - template_name_taken
             - body_too_large
             - unsupported_media_type
             - validation_failed

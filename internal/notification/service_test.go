@@ -28,6 +28,51 @@ type fakeStore struct {
 	listLimits   []int
 	failedCount  int
 	requeueLimit int
+
+	templates     map[uuid.UUID]Template // the stored templates, by ID
+	templateReads int                    // how often Template was called
+	listedTmpls   []Template             // what ListTemplates answers, before the limit
+}
+
+func (f *fakeStore) CreateTemplate(_ context.Context, t Template) (Template, error) {
+	if f.err != nil {
+		return Template{}, f.err
+	}
+	if f.templates == nil {
+		f.templates = map[uuid.UUID]Template{}
+	}
+	f.templates[t.ID] = t
+	return t, nil
+}
+
+func (f *fakeStore) Template(_ context.Context, id uuid.UUID) (Template, error) {
+	f.templateReads++
+	t, ok := f.templates[id]
+	if !ok {
+		return Template{}, ErrNotFound
+	}
+	return t, nil
+}
+
+func (f *fakeStore) ListTemplates(_ context.Context, _ *Cursor, limit int) ([]Template, error) {
+	f.listLimits = append(f.listLimits, limit)
+	return f.listedTmpls[:min(limit, len(f.listedTmpls))], f.err
+}
+
+func (f *fakeStore) UpdateTemplate(_ context.Context, t Template) (Template, error) {
+	if _, ok := f.templates[t.ID]; !ok {
+		return Template{}, ErrNotFound
+	}
+	f.templates[t.ID] = t
+	return t, nil
+}
+
+func (f *fakeStore) DeleteTemplate(_ context.Context, id uuid.UUID) error {
+	if _, ok := f.templates[id]; !ok {
+		return ErrNotFound
+	}
+	delete(f.templates, id)
+	return nil
 }
 
 func (f *fakeStore) List(_ context.Context, _ ListFilter, _ *Cursor, limit int) ([]Notification, error) {

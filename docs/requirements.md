@@ -49,7 +49,7 @@ The expected answer is `202 Accepted` with `{"messageId": "<uuid>", "status": "a
 |---|---|
 | Failure handling | 13, 17, 22, 23 |
 | Scheduled notifications | 31, [0031](adr/0031-scheduled-notifications.md) |
-| Templates with variable substitution | 32 |
+| Templates with variable substitution | 32, [0032](adr/0032-templates.md) |
 | Real-time status updates over WebSocket | 33 |
 | Distributed tracing | 34 |
 | GitHub Actions CI/CD: automated tests and linting | 30, [0030](adr/0030-continuous-integration-and-delivery.md) |

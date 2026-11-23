@@ -53,10 +53,20 @@ type Notification struct {
 	FailureReason     *string
 	ProviderMessageID *string
 	ScheduledAt       *time.Time
+	TemplateID        *uuid.UUID
 }
 
 type Outbox struct {
 	ID             int64
 	NotificationID uuid.UUID
 	CreatedAt      time.Time
+}
+
+type Template struct {
+	ID        uuid.UUID
+	Name      string
+	Channel   string
+	Body      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

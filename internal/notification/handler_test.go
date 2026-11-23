@@ -33,6 +33,36 @@ type fakeService struct {
 	retryFilter []RetryFilter
 	retried     RetryResult
 	summary     Summary
+
+	templateDrafts []TemplateDraft
+	templateIDs    []uuid.UUID
+	template       Template
+	templatePage   TemplatePage
+}
+
+func (f *fakeService) CreateTemplate(_ context.Context, d TemplateDraft) (Template, error) {
+	f.templateDrafts = append(f.templateDrafts, d)
+	return f.template, f.err
+}
+
+func (f *fakeService) Template(_ context.Context, id uuid.UUID) (Template, error) {
+	f.templateIDs = append(f.templateIDs, id)
+	return f.template, f.err
+}
+
+func (f *fakeService) ListTemplates(_ context.Context, after *Cursor, limit int) (TemplatePage, error) {
+	f.cursors, f.limits = append(f.cursors, after), append(f.limits, limit)
+	return f.templatePage, f.err
+}
+
+func (f *fakeService) UpdateTemplate(_ context.Context, id uuid.UUID, d TemplateDraft) (Template, error) {
+	f.templateIDs, f.templateDrafts = append(f.templateIDs, id), append(f.templateDrafts, d)
+	return f.template, f.err
+}
+
+func (f *fakeService) DeleteTemplate(_ context.Context, id uuid.UUID) error {
+	f.templateIDs = append(f.templateIDs, id)
+	return f.err
 }
 
 func (f *fakeService) Summary(context.Context) (Summary, error) {

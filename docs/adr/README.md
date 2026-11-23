@@ -39,6 +39,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0029](0029-contract-tests-and-documentation-page.md) | Contract tests and the documentation page | Accepted |
 | [0030](0030-continuous-integration-and-delivery.md) | Continuous integration and delivery | Accepted |
 | [0031](0031-scheduled-notifications.md) | Scheduled notifications | Accepted |
+| [0032](0032-templates.md) | Templates | Accepted |
 
 ## Template
 

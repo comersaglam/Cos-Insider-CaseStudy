@@ -379,3 +379,59 @@ func TestAPIScheduledEndToEnd(t *testing.T) {
 		t.Errorf("too far ahead = %d %v, want 422 naming scheduledAt", status, problem)
 	}
 }
+
+// TestAPITemplatesEndToEnd: a template is created, used, changed and deleted; a notification keeps the content it
+// was rendered with throughout.
+func TestAPITemplatesEndToEnd(t *testing.T) {
+	base, _ := startAPI(t)
+	const tmpl = `{"name":"order-shipped","channel":"sms","body":"Hi {{.name}}, your order {{.order}} has shipped."}`
+	status, header, created := call(t, http.MethodPost, base+"/v1/templates", tmpl, nil)
+	if status != http.StatusCreated || header.Get("Location") == "" || fmt.Sprint(created["variables"]) != "[name order]" {
+		t.Fatalf("create template = %d %v", status, created)
+	}
+	id, _ := created["id"].(string)
+	if status, _, problem := call(t, http.MethodPost, base+"/v1/templates", tmpl, nil); status != http.StatusConflict || problem["code"] != "template_name_taken" {
+		t.Errorf("same name again = %d %v", status, problem["code"])
+	}
+	if _, _, page := call(t, http.MethodGet, base+"/v1/templates", "", nil); len(page["items"].([]any)) != 1 {
+		t.Errorf("listed %v", page)
+	}
+
+	status, _, n := call(t, http.MethodPost, base+"/v1/notifications",
+		`{"to":"+905551234567","templateId":"`+id+`","variables":{"name":"Ayşe","order":"42"}}`, nil)
+	if status != http.StatusAccepted || n["content"] != "Hi Ayşe, your order 42 has shipped." || n["channel"] != "sms" || n["templateId"] != id {
+		t.Fatalf("notification from the template = %d %v", status, n)
+	}
+	if status, _, problem := call(t, http.MethodPost, base+"/v1/notifications",
+		`{"to":"+905551234567","templateId":"`+id+`","variables":{"name":"Ayşe"}}`, nil); status != http.StatusUnprocessableEntity || problem["errors"] == nil {
+		t.Errorf("a missing variable = %d %v", status, problem)
+	}
+
+	if status, _, _ := call(t, http.MethodPut, base+"/v1/templates/"+id,
+		`{"name":"order-shipped","channel":"sms","body":"Order {{.order}} is on its way, {{.name}}."}`, nil); status != http.StatusOK {
+		t.Errorf("replace = %d", status)
+	}
+	if _, _, again := call(t, http.MethodGet, base+"/v1/notifications/"+n["id"].(string), "", nil); again["content"] != n["content"] {
+		t.Errorf("after the template changed, the notification reads %q", again["content"])
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, base+"/v1/templates/"+id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	contract.Check(t, req, resp.StatusCode, resp.Header, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("delete = %d", resp.StatusCode)
+	}
+	if status, _, _ := call(t, http.MethodGet, base+"/v1/templates/"+id, "", nil); status != http.StatusNotFound {
+		t.Errorf("read after delete = %d", status)
+	}
+	if _, _, kept := call(t, http.MethodGet, base+"/v1/notifications/"+n["id"].(string), "", nil); kept["templateId"] != id {
+		t.Errorf("after the template was deleted, the notification shows templateId %v", kept["templateId"])
+	}
+}

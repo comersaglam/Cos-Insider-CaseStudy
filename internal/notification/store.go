@@ -40,6 +40,7 @@ func (s *Store) Create(ctx context.Context, n Notification, idem IdempotencyKey)
 		CorrelationID: n.CorrelationID,
 		ScheduledAt:   n.ScheduledAt,
 		NextAttemptAt: dueAt(n),
+		TemplateID:    n.TemplateID,
 	}
 	if idem.Key != "" {
 		params.IdempotencyKey = &idem.Key
@@ -101,6 +102,7 @@ func fromRow(r db.Notification) Notification {
 		CorrelationID:     r.CorrelationID,
 		BatchID:           r.BatchID,
 		ScheduledAt:       utc(r.ScheduledAt),
+		TemplateID:        r.TemplateID,
 		FailedAt:          utc(r.FailedAt),
 		Attempts:          r.Attempts,
 		FailureReason:     FailureReason(deref(r.FailureReason)),

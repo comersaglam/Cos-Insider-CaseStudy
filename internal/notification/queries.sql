@@ -2,11 +2,11 @@
 -- Inserts a notification unless its idempotency key is taken, in which case it returns no row.
 INSERT INTO notifications (
     id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id,
-    scheduled_at, next_attempt_at
+    scheduled_at, next_attempt_at, template_id
 ) VALUES (
     @id, @channel, @recipient, @content, @priority, @status,
     sqlc.narg(idempotency_key), sqlc.narg(request_hash), @correlation_id,
-    sqlc.narg(scheduled_at), sqlc.narg(next_attempt_at)
+    sqlc.narg(scheduled_at), sqlc.narg(next_attempt_at), sqlc.narg(template_id)
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 RETURNING *;
@@ -30,10 +30,10 @@ RETURNING *;
 -- name: CopyBatchNotifications :copyfrom
 INSERT INTO notifications (
     id, channel, recipient, content, priority, status, correlation_id, batch_id, batch_index,
-    scheduled_at, next_attempt_at
+    scheduled_at, next_attempt_at, template_id
 ) VALUES (
     @id, @channel, @recipient, @content, @priority, @status, @correlation_id, @batch_id, @batch_index,
-    @scheduled_at, @next_attempt_at
+    @scheduled_at, @next_attempt_at, @template_id
 );
 
 -- name: CopyOutbox :copyfrom
@@ -233,3 +233,26 @@ JOIN notifications n ON n.id = a.notification_id
 WHERE a.created_at >= now() - sqlc.arg(window_ms)::integer * interval '1 millisecond'
   AND a.outcome <> 'unknown'
 GROUP BY n.channel;
+
+-- name: InsertTemplate :one
+INSERT INTO templates (id, name, channel, body) VALUES (@id, @name, @channel, @body)
+RETURNING *;
+
+-- name: GetTemplate :one
+SELECT * FROM templates WHERE id = @id;
+
+-- name: ListTemplates :many
+-- A page of templates, newest first, after the cursor (after_created_at, after_id) when one is given.
+SELECT * FROM templates
+WHERE sqlc.narg(after_created_at)::timestamptz IS NULL
+   OR (created_at, id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_size)::integer;
+
+-- name: UpdateTemplate :one
+UPDATE templates SET name = @name, channel = @channel, body = @body, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: DeleteTemplate :execrows
+DELETE FROM templates WHERE id = @id;

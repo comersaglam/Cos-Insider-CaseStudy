@@ -30,6 +30,11 @@ type service interface {
 	Retry(ctx context.Context, id uuid.UUID) (Notification, error)
 	RetryFailed(ctx context.Context, f RetryFilter) (RetryResult, error)
 	Summary(ctx context.Context) (Summary, error)
+	CreateTemplate(ctx context.Context, d TemplateDraft) (Template, error)
+	Template(ctx context.Context, id uuid.UUID) (Template, error)
+	ListTemplates(ctx context.Context, after *Cursor, limit int) (TemplatePage, error)
+	UpdateTemplate(ctx context.Context, id uuid.UUID, d TemplateDraft) (Template, error)
+	DeleteTemplate(ctx context.Context, id uuid.UUID) error
 }
 
 // Handler serves the notification and batch endpoints. It reads requests and writes answers; the rules are in
@@ -57,22 +62,29 @@ func (h *Handler) RegisterRoutes(mux httpx.Mux) {
 	mux.Handle("GET /v1/metrics", httpx.Handle(h.log, h.summary))
 	mux.Handle("POST /v1/batches", httpx.Handle(h.log, h.createBatch))
 	mux.Handle("GET /v1/batches/{id}", httpx.Handle(h.log, h.getBatch))
+	mux.Handle("POST /v1/templates", httpx.Handle(h.log, h.createTemplate))
+	mux.Handle("GET /v1/templates", httpx.Handle(h.log, h.listTemplates))
+	mux.Handle("GET /v1/templates/{id}", httpx.Handle(h.log, h.getTemplate))
+	mux.Handle("PUT /v1/templates/{id}", httpx.Handle(h.log, h.updateTemplate))
+	mux.Handle("DELETE /v1/templates/{id}", httpx.Handle(h.log, h.deleteTemplate))
 }
 
 // createRequest is the body of POST /v1/notifications. The member names are the provider contract's.
 type createRequest struct {
-	To          string     `json:"to"`
-	Channel     string     `json:"channel"`
-	Content     string     `json:"content"`
-	Priority    string     `json:"priority"`
-	ScheduledAt *time.Time `json:"scheduledAt"`
+	To          string            `json:"to"`
+	Channel     string            `json:"channel"`
+	Content     string            `json:"content"`
+	Priority    string            `json:"priority"`
+	ScheduledAt *time.Time        `json:"scheduledAt"`
+	TemplateID  *uuid.UUID        `json:"templateId"`
+	Variables   map[string]string `json:"variables"`
 }
 
 // draft turns the request into a draft; a priority left out means normal.
 func (req createRequest) draft() Draft {
 	d := Draft{
 		To: req.To, Channel: Channel(req.Channel), Content: req.Content, Priority: Priority(req.Priority),
-		ScheduledAt: req.ScheduledAt,
+		ScheduledAt: req.ScheduledAt, TemplateID: req.TemplateID, Variables: req.Variables,
 	}
 	if d.Priority == "" {
 		d.Priority = PriorityNormal
@@ -102,6 +114,7 @@ type notificationResponse struct {
 	CorrelationID     string        `json:"correlationId"`
 	BatchID           *uuid.UUID    `json:"batchId,omitzero"`
 	ScheduledAt       *time.Time    `json:"scheduledAt,omitzero"`
+	TemplateID        *uuid.UUID    `json:"templateId,omitzero"`
 	FailedAt          *time.Time    `json:"failedAt,omitzero"`
 	Attempts          int           `json:"attempts"`
 	FailureReason     FailureReason `json:"failureReason,omitzero"`
@@ -179,6 +192,8 @@ func toProblem(err error) error {
 		return httpx.NewProblem(http.StatusConflict, "not_cancellable", err.Error())
 	case errors.Is(err, ErrNotRetryable):
 		return httpx.NewProblem(http.StatusConflict, "not_retryable", err.Error())
+	case errors.Is(err, ErrTemplateNameTaken):
+		return httpx.NewProblem(http.StatusConflict, "template_name_taken", err.Error())
 	}
 	return err
 }

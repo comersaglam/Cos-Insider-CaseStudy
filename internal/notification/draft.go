@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"uuid"
 )
 
 // maxContent is the longest content each channel accepts, counted in characters (Unicode code points), not
@@ -63,13 +64,16 @@ func (e *ValidationError) Error() string {
 const MaxScheduleAhead = 30 * 24 * time.Hour
 
 // Draft is a notification as a client asks for it, before it is stored. To, Channel and Content are exactly what
-// the provider receives; Priority orders the work and ScheduledAt delays it, and neither is sent.
+// the provider receives; Priority orders the work and ScheduledAt delays it, and neither is sent. A draft naming a
+// template leaves Content, and may leave Channel, to the template, rendered with Variables (ADR 0032).
 type Draft struct {
 	To          string
 	Channel     Channel
 	Content     string
 	Priority    Priority
 	ScheduledAt *time.Time
+	TemplateID  *uuid.UUID
+	Variables   map[string]string
 }
 
 // Validate checks every field of d at the moment now and returns a *ValidationError listing each one that breaks a
