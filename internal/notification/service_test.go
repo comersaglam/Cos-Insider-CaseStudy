@@ -14,9 +14,14 @@ import (
 type fakeStore struct {
 	created     []Notification
 	keys        []IdempotencyKey
-	replay      bool  // answer Create as a repeated request
+	replay      bool  // answer Create and CreateBatch as a repeated request
 	err         error // answer every call with this error
 	notFoundGet bool
+
+	batches       []NewBatch
+	batchKeys     []IdempotencyKey
+	storedBatch   Batch
+	batchNotFound bool
 }
 
 func (f *fakeStore) Create(_ context.Context, n Notification, idem IdempotencyKey) (Notification, bool, error) {
@@ -33,6 +38,26 @@ func (f *fakeStore) Get(_ context.Context, id uuid.UUID) (Notification, error) {
 		return Notification{}, ErrNotFound
 	}
 	return Notification{ID: id}, f.err
+}
+
+func (f *fakeStore) CreateBatch(_ context.Context, b NewBatch, idem IdempotencyKey) (Batch, bool, error) {
+	if f.err != nil {
+		return Batch{}, false, f.err
+	}
+	f.batches = append(f.batches, b)
+	f.batchKeys = append(f.batchKeys, idem)
+	stored := Batch{ID: b.ID, Total: b.Total, Accepted: len(b.Items), Rejections: b.Rejections}
+	for _, item := range b.Items {
+		stored.Items = append(stored.Items, BatchItem{Index: item.Index, ID: item.Notification.ID})
+	}
+	return stored, !f.replay, nil
+}
+
+func (f *fakeStore) GetBatch(_ context.Context, _ uuid.UUID) (Batch, error) {
+	if f.batchNotFound {
+		return Batch{}, ErrNotFound
+	}
+	return f.storedBatch, nil
 }
 
 func newTestService(store *fakeStore) *Service {

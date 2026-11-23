@@ -14,10 +14,24 @@ sql:
         sql_package: pgx/v5
         emit_pointers_for_null_types: true
         overrides:
+          # int, not int32: pgx checks the range when it writes, and conversions to int32 would be everywhere.
+          - db_type: pg_catalog.int4
+            go_type: int
+          - db_type: pg_catalog.int4
+            nullable: true
+            go_type:
+              type: int
+              pointer: true
           - db_type: uuid
             go_type:
               import: uuid
               type: UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: uuid
+              type: UUID
+              pointer: true
           - db_type: timestamptz
             go_type: time.Time
           - db_type: timestamptz

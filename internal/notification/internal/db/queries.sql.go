@@ -11,8 +11,89 @@ import (
 	"uuid"
 )
 
+type CopyBatchNotificationsParams struct {
+	ID            uuid.UUID
+	Channel       string
+	Recipient     string
+	Content       string
+	Priority      string
+	Status        string
+	CorrelationID string
+	BatchID       *uuid.UUID
+	BatchIndex    *int
+}
+
+const countBatchStatuses = `-- name: CountBatchStatuses :many
+SELECT status, count(*)::integer AS count FROM notifications WHERE batch_id = $1 GROUP BY status
+`
+
+type CountBatchStatusesRow struct {
+	Status string
+	Count  int
+}
+
+func (q *Queries) CountBatchStatuses(ctx context.Context, batchID *uuid.UUID) ([]CountBatchStatusesRow, error) {
+	rows, err := q.db.Query(ctx, countBatchStatuses, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountBatchStatusesRow
+	for rows.Next() {
+		var i CountBatchStatusesRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBatch = `-- name: GetBatch :one
+SELECT id, total, accepted, rejections, idempotency_key, request_hash, correlation_id, created_at FROM batches WHERE id = $1
+`
+
+func (q *Queries) GetBatch(ctx context.Context, id uuid.UUID) (Batch, error) {
+	row := q.db.QueryRow(ctx, getBatch, id)
+	var i Batch
+	err := row.Scan(
+		&i.ID,
+		&i.Total,
+		&i.Accepted,
+		&i.Rejections,
+		&i.IdempotencyKey,
+		&i.RequestHash,
+		&i.CorrelationID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getBatchByIdempotencyKey = `-- name: GetBatchByIdempotencyKey :one
+SELECT id, total, accepted, rejections, idempotency_key, request_hash, correlation_id, created_at FROM batches WHERE idempotency_key = $1
+`
+
+func (q *Queries) GetBatchByIdempotencyKey(ctx context.Context, idempotencyKey *string) (Batch, error) {
+	row := q.db.QueryRow(ctx, getBatchByIdempotencyKey, idempotencyKey)
+	var i Batch
+	err := row.Scan(
+		&i.ID,
+		&i.Total,
+		&i.Accepted,
+		&i.Rejections,
+		&i.IdempotencyKey,
+		&i.RequestHash,
+		&i.CorrelationID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getNotification = `-- name: GetNotification :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at FROM notifications WHERE id = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index FROM notifications WHERE id = $1
 `
 
 func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
@@ -30,12 +111,14 @@ func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notificati
 		&i.CorrelationID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BatchID,
+		&i.BatchIndex,
 	)
 	return i, err
 }
 
 const getNotificationByIdempotencyKey = `-- name: GetNotificationByIdempotencyKey :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at FROM notifications WHERE idempotency_key = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index FROM notifications WHERE idempotency_key = $1
 `
 
 func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempotencyKey *string) (Notification, error) {
@@ -53,6 +136,50 @@ func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempoten
 		&i.CorrelationID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BatchID,
+		&i.BatchIndex,
+	)
+	return i, err
+}
+
+const insertBatch = `-- name: InsertBatch :one
+INSERT INTO batches (id, total, accepted, rejections, idempotency_key, request_hash, correlation_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+RETURNING id, total, accepted, rejections, idempotency_key, request_hash, correlation_id, created_at
+`
+
+type InsertBatchParams struct {
+	ID             uuid.UUID
+	Total          int
+	Accepted       int
+	Rejections     []byte
+	IdempotencyKey *string
+	RequestHash    []byte
+	CorrelationID  string
+}
+
+// Inserts a batch unless its idempotency key is taken, in which case it returns no row.
+func (q *Queries) InsertBatch(ctx context.Context, arg InsertBatchParams) (Batch, error) {
+	row := q.db.QueryRow(ctx, insertBatch,
+		arg.ID,
+		arg.Total,
+		arg.Accepted,
+		arg.Rejections,
+		arg.IdempotencyKey,
+		arg.RequestHash,
+		arg.CorrelationID,
+	)
+	var i Batch
+	err := row.Scan(
+		&i.ID,
+		&i.Total,
+		&i.Accepted,
+		&i.Rejections,
+		&i.IdempotencyKey,
+		&i.RequestHash,
+		&i.CorrelationID,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -65,7 +192,7 @@ INSERT INTO notifications (
     $7, $8, $9
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index
 `
 
 type InsertNotificationParams struct {
@@ -106,6 +233,8 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.CorrelationID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BatchID,
+		&i.BatchIndex,
 	)
 	return i, err
 }
@@ -117,4 +246,33 @@ INSERT INTO outbox (notification_id) VALUES ($1)
 func (q *Queries) InsertOutbox(ctx context.Context, notificationID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, insertOutbox, notificationID)
 	return err
+}
+
+const listBatchItems = `-- name: ListBatchItems :many
+SELECT batch_index, id FROM notifications WHERE batch_id = $1 ORDER BY batch_index
+`
+
+type ListBatchItemsRow struct {
+	BatchIndex *int
+	ID         uuid.UUID
+}
+
+func (q *Queries) ListBatchItems(ctx context.Context, batchID *uuid.UUID) ([]ListBatchItemsRow, error) {
+	rows, err := q.db.Query(ctx, listBatchItems, batchID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListBatchItemsRow
+	for rows.Next() {
+		var i ListBatchItemsRow
+		if err := rows.Scan(&i.BatchIndex, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

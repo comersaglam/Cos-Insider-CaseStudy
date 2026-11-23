@@ -102,9 +102,102 @@ paths:
         '500':
           $ref: '#/components/responses/Problem'
 
+  /v1/batches:
+    post:
+      operationId: createBatch
+      summary: Accept up to 1000 notifications at once
+      description: |
+        Each item is validated on its own. The valid items are stored as `queued` notifications, in one
+        transaction, and the invalid ones are reported with their position and reasons: one invalid item does not
+        refuse the others. The answer is `202` while at least one item is accepted, and `422` when none is, in
+        which case nothing is stored.
+
+        The answer lists the ID each accepted item was given, by its position in the request. The batch keeps
+        the rejected items' positions and reasons, never their content, and shows them when read.
+
+        An `Idempotency-Key` covers the whole batch: repeating the request returns the first batch, marked
+        `Idempotent-Replayed: true`. Batch keys and notification keys are separate.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchRequest'
+            example:
+              notifications:
+                - { to: '+905551234567', channel: sms, content: 'Flash sale: 40% off until midnight.' }
+                - { to: '05551234567', channel: sms, content: 'Flash sale: 40% off until midnight.' }
+                - { to: ayse@example.com, channel: email, content: 'Flash sale: 40% off until midnight.', priority: high }
+      responses:
+        '202':
+          description: At least one item was accepted; the rejected ones are listed.
+          headers:
+            Location:
+              description: The batch's URL.
+              schema: { type: string, example: /v1/batches/0193a8f2-7c1e-7b3a-9d4e-2f1a3b4c5d70 }
+            Idempotent-Replayed:
+              description: Present, as `true`, when the request repeats an earlier one with the same key.
+              schema: { type: string, enum: ['true'] }
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+        '400':
+          description: >-
+            The body is not valid JSON (`invalid_json`), has a member the request does not define
+            (`unknown_field`), or the `Idempotency-Key` header is malformed (`invalid_idempotency_key`).
+          $ref: '#/components/responses/Problem'
+        '413':
+          description: The body is larger than the batch limit, 10 MiB by default (`body_too_large`).
+          $ref: '#/components/responses/Problem'
+        '415':
+          description: The body is not sent as `application/json` (`unsupported_media_type`).
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: >-
+            No item is valid, or the batch is empty or holds more than 1000 items (`validation_failed`, with
+            `errors` such as `/notifications/3/to`), or the idempotency key was used for a different batch
+            (`idempotency_key_reused`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
+  /v1/batches/{id}:
+    get:
+      operationId: getBatch
+      summary: Read a batch, its notifications counted by status
+      parameters:
+        - $ref: '#/components/parameters/BatchID'
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The batch, with `statuses` counting its notifications by their status now.
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+        '404':
+          description: No batch has this ID, or the ID is not a UUID (`not_found`).
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+
 components:
   parameters:
     NotificationID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchID:
       name: id
       in: path
       required: true
@@ -203,6 +296,55 @@ components:
         correlationId: { type: string }
         createdAt: { type: string, format: date-time, description: 'UTC' }
         updatedAt: { type: string, format: date-time, description: 'UTC' }
+
+    CreateBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: Each item is validated as a single create's body is; invalid items are reported, not fatal.
+          items:
+            $ref: '#/components/schemas/CreateNotificationRequest'
+
+    Batch:
+      type: object
+      required: [id, total, accepted, rejected, rejections, correlationId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        total: { type: integer, description: 'Items in the request.' }
+        accepted: { type: integer, description: 'Items stored as notifications.' }
+        rejected: { type: integer, description: 'Items refused; total = accepted + rejected.' }
+        notifications:
+          type: array
+          description: In the answer to a create only; the ID each accepted item was given.
+          items:
+            type: object
+            required: [index, id]
+            properties:
+              index: { type: integer, description: 'The position in the request, counted from zero.' }
+              id: { type: string, format: uuid }
+        statuses:
+          type: object
+          description: When the batch is read only; its notifications counted by their status now.
+          propertyNames: { $ref: '#/components/schemas/Status' }
+          additionalProperties: { type: integer }
+          example: { queued: 980, sent: 18 }
+        rejections:
+          type: array
+          items:
+            type: object
+            required: [index, errors]
+            properties:
+              index: { type: integer, description: 'The position in the request, counted from zero.' }
+              errors:
+                type: array
+                items: { $ref: '#/components/schemas/FieldProblem' }
+        correlationId: { type: string }
+        createdAt: { type: string, format: date-time, description: 'UTC' }
 
     Problem:
       type: object

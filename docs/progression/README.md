@@ -27,7 +27,8 @@ finds the commit that finished block NN.
 | [12](12-platform.md) | Platform: config, observability, httpx | 2026-11-23 | Configuration reader, JSON logger with correlation IDs, RFC 9457 errors, strict JSON decoding, middleware | `8080430` |
 | [13](13-dead-letters-and-replay.md) | Dead letters and replay | 2026-11-23 | Bulk replay by filter from PostgreSQL; unprocessable messages marked `failed` | `545e91b` |
 | [14](14-database-and-store.md) | Database and store | 2026-11-23 | First migration, pool and migrator, per-test databases, sqlc, idempotent create | `6ccf017` |
-| [15](15-create-get-and-a-running-api.md) | Create, get and a running API | 2026-11-23 | `POST` and `GET` notifications served by `cmd/api`, graceful shutdown, `api migrate`, the OpenAPI contract begun | this block's commit |
+| [15](15-create-get-and-a-running-api.md) | Create, get and a running API | 2026-11-23 | `POST` and `GET` notifications served by `cmd/api`, graceful shutdown, `api migrate`, the OpenAPI contract begun | `d222e94` |
+| [16](16-batches.md) | Batch create and batch status | 2026-11-23 | Up to 1000 per request, valid items accepted and invalid ones reported, rejections kept without content | this block's commit |
 
 ## Template
 

@@ -20,6 +20,28 @@ type fakeService struct {
 	result Notification
 	replay bool
 	err    error
+
+	batchDrafts [][]Draft
+	batch       Batch
+}
+
+func (f *fakeService) CreateBatch(_ context.Context, drafts []Draft, key string) (Batch, bool, error) {
+	f.batchDrafts = append(f.batchDrafts, drafts)
+	f.keys = append(f.keys, key)
+	if f.err != nil {
+		return Batch{}, false, f.err
+	}
+	return f.batch, !f.replay, nil
+}
+
+func (f *fakeService) GetBatch(_ context.Context, id uuid.UUID) (Batch, error) {
+	if f.err != nil {
+		return Batch{}, f.err
+	}
+	if id != f.batch.ID {
+		return Batch{}, ErrNotFound
+	}
+	return f.batch, nil
 }
 
 func (f *fakeService) Create(_ context.Context, d Draft, key string) (Notification, bool, error) {
@@ -47,11 +69,20 @@ var stored = Notification{
 	CreatedAt: time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC),
 }
 
+// testBatchLimit is the batch body limit the handlers are tested with.
+const testBatchLimit = 10 << 20
+
 // serve sends one request through a mux with the module's routes.
 func serve(t *testing.T, svc service, method, path, body string, header map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
+	return serveWithLimit(t, svc, testBatchLimit, method, path, body, header)
+}
+
+// serveWithLimit is serve with a batch body limit of its own.
+func serveWithLimit(t *testing.T, svc service, limit int64, method, path, body string, header map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
-	NewHandler(svc, slog.New(slog.DiscardHandler)).RegisterRoutes(mux)
+	NewHandler(svc, slog.New(slog.DiscardHandler), limit).RegisterRoutes(mux)
 	r := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 	if body != "" {
 		r.Header.Set("Content-Type", "application/json")

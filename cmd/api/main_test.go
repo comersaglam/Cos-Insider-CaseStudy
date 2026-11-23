@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -43,8 +44,9 @@ func TestRunMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	// The helper's database is migrated already; empty it so that migrate has work to do.
-	if _, err := pool.Exec(t.Context(), "DROP TABLE outbox, notifications, schema_migrations"); err != nil {
+	// The helper's database is migrated already; empty it, whatever tables later migrations add, so that migrate
+	// has work to do.
+	if _, err := pool.Exec(t.Context(), "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,6 +174,49 @@ func TestAPIEndToEnd(t *testing.T) {
 
 	if status, _, p := call(t, http.MethodGet, base+"/v1/nothing", "", nil); status != 404 || p["code"] != "not_found" {
 		t.Errorf("unknown path = %d %v", status, p)
+	}
+}
+
+// TestAPIBatchEndToEnd sends a batch with one invalid item among valid ones: the valid ones are accepted and can
+// be read, the invalid one is reported, and the batch counts its notifications by status.
+func TestAPIBatchEndToEnd(t *testing.T) {
+	base := startAPI(t)
+	const batch = `{"notifications":[
+		{"to":"+905551234567","channel":"sms","content":"one"},
+		{"to":"not-a-number","channel":"sms","content":"two"},
+		{"to":"ayse@example.com","channel":"email","content":"three"}]}`
+
+	status, header, created := call(t, http.MethodPost, base+"/v1/batches", batch, map[string]string{"Idempotency-Key": "campaign-1"})
+	if status != http.StatusAccepted || created["accepted"] != float64(2) || created["rejected"] != float64(1) {
+		t.Fatalf("create batch = %d %v", status, created)
+	}
+	items, _ := created["notifications"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("notifications = %v, want two", created["notifications"])
+	}
+	second, _ := items[1].(map[string]any)
+	if second["index"] != float64(2) {
+		t.Errorf("second accepted item has index %v, want 2", second["index"])
+	}
+	if status, _, n := call(t, http.MethodGet, base+"/v1/notifications/"+second["id"].(string), "", nil); status != 200 || n["to"] != "ayse@example.com" {
+		t.Errorf("get the second item = %d %v", status, n)
+	}
+
+	status, _, read := call(t, http.MethodGet, base+header.Get("Location"), "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("get batch = %d %v", status, read)
+	}
+	if statuses, _ := read["statuses"].(map[string]any); statuses["queued"] != float64(2) {
+		t.Errorf("statuses = %v, want 2 queued", read["statuses"])
+	}
+	rejections, _ := read["rejections"].([]any)
+	if len(rejections) != 1 || !strings.Contains(fmt.Sprint(rejections[0]), "/notifications/1/to") {
+		t.Errorf("rejections = %v, want item 1's recipient", read["rejections"])
+	}
+
+	status, header, again := call(t, http.MethodPost, base+"/v1/batches", batch, map[string]string{"Idempotency-Key": "campaign-1"})
+	if status != http.StatusAccepted || again["id"] != created["id"] || header.Get("Idempotent-Replayed") != "true" {
+		t.Errorf("repeat = %d %v; want the first batch, replayed", status, again["id"])
 	}
 }
 

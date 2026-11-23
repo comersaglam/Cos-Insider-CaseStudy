@@ -10,6 +10,17 @@ import (
 	"uuid"
 )
 
+type Batch struct {
+	ID             uuid.UUID
+	Total          int
+	Accepted       int
+	Rejections     []byte
+	IdempotencyKey *string
+	RequestHash    []byte
+	CorrelationID  string
+	CreatedAt      time.Time
+}
+
 type Notification struct {
 	ID             uuid.UUID
 	Channel        string
@@ -22,6 +33,8 @@ type Notification struct {
 	CorrelationID  string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	BatchID        *uuid.UUID
+	BatchIndex     *int
 }
 
 type Outbox struct {

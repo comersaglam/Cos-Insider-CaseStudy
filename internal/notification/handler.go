@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 	"uuid"
 
@@ -22,23 +23,30 @@ const maxIdempotencyKey = 255
 type service interface {
 	Create(ctx context.Context, d Draft, idempotencyKey string) (Notification, bool, error)
 	Get(ctx context.Context, id uuid.UUID) (Notification, error)
+	CreateBatch(ctx context.Context, drafts []Draft, idempotencyKey string) (Batch, bool, error)
+	GetBatch(ctx context.Context, id uuid.UUID) (Batch, error)
 }
 
-// Handler serves the notification endpoints. It reads requests and writes answers; the rules are in Service.
+// Handler serves the notification and batch endpoints. It reads requests and writes answers; the rules are in
+// Service.
 type Handler struct {
-	svc service
-	log *slog.Logger
+	svc          service
+	log          *slog.Logger
+	maxBatchBody int64
 }
 
-// NewHandler returns the handlers over svc; log receives the errors they cannot answer in detail.
-func NewHandler(svc service, log *slog.Logger) *Handler {
-	return &Handler{svc: svc, log: log}
+// NewHandler returns the handlers over svc. log receives the errors they cannot answer in detail; maxBatchBody
+// bounds the body of a batch request, in bytes.
+func NewHandler(svc service, log *slog.Logger, maxBatchBody int64) *Handler {
+	return &Handler{svc: svc, log: log, maxBatchBody: maxBatchBody}
 }
 
 // RegisterRoutes mounts the module's endpoints on mux (ADR 0008).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /v1/notifications", httpx.Handle(h.log, h.create))
 	mux.Handle("GET /v1/notifications/{id}", httpx.Handle(h.log, h.get))
+	mux.Handle("POST /v1/batches", httpx.Handle(h.log, h.createBatch))
+	mux.Handle("GET /v1/batches/{id}", httpx.Handle(h.log, h.getBatch))
 }
 
 // createRequest is the body of POST /v1/notifications. The member names are the provider contract's.
@@ -47,6 +55,26 @@ type createRequest struct {
 	Channel  string `json:"channel"`
 	Content  string `json:"content"`
 	Priority string `json:"priority"`
+}
+
+// draft turns the request into a draft; a priority left out means normal.
+func (req createRequest) draft() Draft {
+	d := Draft{To: req.To, Channel: Channel(req.Channel), Content: req.Content, Priority: Priority(req.Priority)}
+	if d.Priority == "" {
+		d.Priority = PriorityNormal
+	}
+	return d
+}
+
+// idempotencyKey returns the request's Idempotency-Key header, "" when it has none, or a problem when it is
+// malformed.
+func idempotencyKey(r *http.Request) (string, error) {
+	key := r.Header.Get("Idempotency-Key")
+	if key != "" && (len(key) > maxIdempotencyKey || !isVisibleASCII(key)) {
+		return "", httpx.NewProblem(http.StatusBadRequest, "invalid_idempotency_key",
+			"the Idempotency-Key header must be 1 to 255 visible ASCII characters")
+	}
+	return key, nil
 }
 
 // notificationResponse is a notification as the API shows it.
@@ -71,21 +99,16 @@ func toResponse(n Notification) notificationResponse {
 // create accepts a notification for sending: 202 with the notification and its Location, since it is accepted,
 // not yet sent. A repeated request gets the same answer, marked Idempotent-Replayed.
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) error {
-	key := r.Header.Get("Idempotency-Key")
-	if key != "" && (len(key) > maxIdempotencyKey || !isVisibleASCII(key)) {
-		return httpx.NewProblem(http.StatusBadRequest, "invalid_idempotency_key",
-			"the Idempotency-Key header must be 1 to 255 visible ASCII characters")
+	key, err := idempotencyKey(r)
+	if err != nil {
+		return err
 	}
 	var req createRequest
 	if err := httpx.DecodeJSON(w, r, maxCreateBody, &req); err != nil {
 		return err
 	}
 
-	d := Draft{To: req.To, Channel: Channel(req.Channel), Content: req.Content, Priority: Priority(req.Priority)}
-	if d.Priority == "" {
-		d.Priority = PriorityNormal
-	}
-	n, created, err := h.svc.Create(r.Context(), d, key)
+	n, created, err := h.svc.Create(r.Context(), req.draft(), key)
 	if err != nil {
 		return toProblem(err)
 	}
@@ -115,9 +138,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) error {
 // log and answer with 500.
 func toProblem(err error) error {
 	if verr, ok := errors.AsType[*ValidationError](err); ok {
-		p := httpx.NewProblem(http.StatusUnprocessableEntity, "validation_failed", "the notification is invalid")
-		for _, f := range verr.Fields {
-			p.Errors = append(p.Errors, httpx.FieldProblem{Pointer: "/" + f.Field, Code: string(f.Code), Detail: f.Message})
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, "validation_failed", "the request is invalid")
+		p.Errors = fieldProblems("", verr.Fields)
+		return p
+	}
+	if berr, ok := errors.AsType[*BatchError](err); ok {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, "validation_failed", "no notification of the batch is valid")
+		for _, rej := range berr.Rejections {
+			p.Errors = append(p.Errors, fieldProblems(itemPointer(rej.Index), rej.Fields)...)
 		}
 		return p
 	}
@@ -126,7 +154,21 @@ func toProblem(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, "idempotency_key_reused",
 			"this Idempotency-Key was used for a different request")
 	case errors.Is(err, ErrNotFound):
-		return httpx.NewProblem(http.StatusNotFound, "not_found", "no notification has this ID")
+		return httpx.NewProblem(http.StatusNotFound, "not_found", "nothing has this ID")
 	}
 	return err
+}
+
+// fieldProblems locates each field error under prefix, a JSON Pointer to the object holding the fields.
+func fieldProblems(prefix string, fields []FieldError) []httpx.FieldProblem {
+	problems := make([]httpx.FieldProblem, 0, len(fields))
+	for _, f := range fields {
+		problems = append(problems, httpx.FieldProblem{Pointer: prefix + "/" + f.Field, Code: string(f.Code), Detail: f.Message})
+	}
+	return problems
+}
+
+// itemPointer is the JSON Pointer to a batch request's item.
+func itemPointer(index int) string {
+	return "/notifications/" + strconv.Itoa(index)
 }

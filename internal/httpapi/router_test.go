@@ -26,6 +26,14 @@ func (noNotifications) Get(context.Context, uuid.UUID) (notification.Notificatio
 	return notification.Notification{}, notification.ErrNotFound
 }
 
+func (noNotifications) CreateBatch(context.Context, []notification.Draft, string) (notification.Batch, bool, error) {
+	return notification.Batch{}, false, nil
+}
+
+func (noNotifications) GetBatch(context.Context, uuid.UUID) (notification.Batch, error) {
+	return notification.Batch{}, notification.ErrNotFound
+}
+
 func TestRouter(t *testing.T) {
 	tests := []struct {
 		name, method, path string
@@ -33,6 +41,7 @@ func TestRouter(t *testing.T) {
 		code               string
 	}{
 		{"a module's route", http.MethodGet, "/v1/notifications/" + uuid.NewV7().String(), 404, "not_found"},
+		{"another of its routes", http.MethodGet, "/v1/batches/" + uuid.NewV7().String(), 404, "not_found"},
 		{"an unknown path", http.MethodGet, "/v1/unknown", 404, "not_found"},
 		{"a known path with another method", http.MethodDelete, "/v1/notifications/x", 405, "method_not_allowed"},
 	}
@@ -40,7 +49,7 @@ func TestRouter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			log := observability.NewLogger(&logs, slog.LevelInfo)
-			h := NewRouter(log, notification.NewHandler(noNotifications{}, log))
+			h := NewRouter(log, notification.NewHandler(noNotifications{}, log, 1<<20))
 
 			r := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
 			r.Header.Set(observability.CorrelationHeader, "trace-me")

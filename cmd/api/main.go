@@ -15,6 +15,7 @@
 //	HTTP_ADDR          address to listen on (default :8080)
 //	LOG_LEVEL          debug, info, warn or error (default info)
 //	SHUTDOWN_TIMEOUT   how long requests in flight may take to finish when stopping (default 15s)
+//	BATCH_MAX_BODY_BYTES  the largest batch request body, in bytes (default 10485760, 10 MiB)
 package main
 
 import (
@@ -36,6 +37,10 @@ import (
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/migrations"
 )
+
+// defaultMaxBatchBody fits a full batch of the longest SMS or push messages (about 4 MB) or of e-mails averaging
+// 10 KB, while bounding the memory one request can take; larger e-mails go in smaller batches (ADR 0017).
+const defaultMaxBatchBody = 10 << 20
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -64,6 +69,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	addr := cfg.String("HTTP_ADDR", ":8080")
 	level := cfg.LogLevel("LOG_LEVEL", slog.LevelInfo)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
+	maxBatchBody := cfg.Int("BATCH_MAX_BODY_BYTES", defaultMaxBatchBody)
 	if err := cfg.Err(); err != nil {
 		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
@@ -84,7 +90,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 		return nil
 	}
 
-	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log)
+	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log, int64(maxBatchBody))
 	srv := httpx.NewServer(httpapi.NewRouter(log, notifications), log)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {

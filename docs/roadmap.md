@@ -63,12 +63,13 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   `Idempotent-Replayed`; migrations as a separate `api migrate` step; `api/openapi.yaml` by hand, from this block on.
 
 ### 16. Batch create and batch status
-- **Scope**: `POST /v1/notifications/batch` (up to 1000), `GET /v1/batches/{id}` with counts per status.
-- **Tests**: 1000 accepted, 1001 refused; behaviour with invalid items; all rows in one transaction.
+- **Scope**: `POST /v1/batches` (up to 1000), `GET /v1/batches/{id}` with counts per status and the rejected items.
+- **Tests**: 1000 accepted, 1001 refused; invalid items reported while the valid ones are accepted; nothing stored
+  when nothing is valid; a repeated batch returns the first; all rows in one transaction.
 - **Watch**: `COPY` through pgx `CopyFrom` for notifications and outbox rows.
-- **Open question**: one invalid item refuses the whole batch (atomic), or valid items are accepted and invalid
-  ones reported (partial); the body size limit, since 1000 e-mails of 100,000 characters could reach 400 MB.
-- **Migration**: `batches` and `notifications.batch_id`.
+- **Migration**: `batches` and `notifications.batch_id`, `batch_index`.
+- **Decided** ([ADR 0017](adr/0017-batches.md)): partial acceptance; rejections kept as positions and reasons,
+  never content; one key per batch; a 10 MiB body limit set by `BATCH_MAX_BODY_BYTES`.
 
 ### 17. List, cancel and retry
 - **Scope**: `GET /v1/notifications` with status, channel, date range and batch filters and keyset cursors;

@@ -1,7 +1,7 @@
 # 15. Create, get and a running API
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `d222e94`
 - Decisions: [ADR 0016](../adr/0016-http-api-and-the-api-process.md)
 
 ## Goal
