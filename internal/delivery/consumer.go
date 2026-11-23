@@ -222,6 +222,12 @@ func (c *Consumer) settle(r result) error {
 
 // handle claims, sends and records one message's notification.
 func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
+	// The relay puts the notification's correlation ID in a header, so even the lines written before the
+	// notification is read are linked to the request that created it; anyone who can publish can set a header, so
+	// it is checked as the API checks a client's.
+	if id, _ := d.Headers[observability.CorrelationHeader].(string); observability.ValidCorrelationID(id) {
+		ctx = observability.WithCorrelationID(ctx, id)
+	}
 	msg, err := notification.ParseQueueMessage(d.Body)
 	if err != nil {
 		return c.unprocessable(ctx, d, err)

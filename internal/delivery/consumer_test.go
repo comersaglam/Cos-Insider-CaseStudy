@@ -1,9 +1,11 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
 )
 
 // acks records how each delivery was settled, standing in for the AMQP channel.
@@ -386,5 +390,34 @@ func TestConsumerFinishesSendsInFlightWhenStopped(t *testing.T) {
 	}
 	if acked, _ := a.counts(); acked != 1 || len(store.finished) != 1 || store.finished[0].Next != notification.StatusSent {
 		t.Errorf("acked %d, finished %+v; want the send in flight recorded and acknowledged, and nothing else", acked, store.finished)
+	}
+}
+
+// TestConsumerLogsUnderTheMessagesCorrelationID: lines written before the notification is read, such as a
+// dead-lettered message's, carry the correlation ID of the message's header. A value that is not a valid ID, which
+// could forge log lines, is ignored.
+func TestConsumerLogsUnderTheMessagesCorrelationID(t *testing.T) {
+	for _, tt := range []struct {
+		name, header string
+		want         bool
+	}{
+		{"a valid ID", "trace-me", true},
+		{"a forged line break", "trace-me\n{\"level\":\"ERROR\"}", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			var a acks
+			c := NewConsumer(&fakeStore{}, fakeSender{}, testConfig(), testMetrics(), observability.NewLogger(&logs, slog.LevelInfo))
+			d := amqp.Delivery{Body: []byte("not json"), MessageId: "?", Headers: amqp.Table{rabbitmq.CorrelationHeader: tt.header}}
+			if err := runUntilSettled(t, c, deliveriesOf(&a, d), &a, 1); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(logs.String(), "unprocessable message dead-lettered") {
+				t.Fatalf("no dead-letter line:\n%s", logs.String())
+			}
+			if tt.want != strings.Contains(logs.String(), `"correlation_id":"trace-me"`) || !tt.want && strings.Contains(logs.String(), "correlation_id") {
+				t.Errorf("correlation in the log = %v, want %v:\n%s", !tt.want, tt.want, logs.String())
+			}
+		})
 	}
 }

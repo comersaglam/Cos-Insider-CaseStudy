@@ -179,6 +179,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - The request's correlation ID is stored on the notification, carried in an AMQP header, logged by the worker and
   sent to the provider.
 - **Test**: one ID links the API's and the worker's log lines.
+- **Decided** ([ADR 0028](adr/0028-correlation-across-the-queue.md)): a notification keeps its creating request's ID
+  through every retry; the consumer takes the ID from the message header, checked, before it reads the message.
 
 ## Phase 4: deliverables
 

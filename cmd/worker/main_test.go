@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"uuid"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/testenv"
 )
@@ -41,14 +43,15 @@ func TestRunTakesNoArguments(t *testing.T) {
 	}
 }
 
-// provider is a fake provider recording each request's recipient and idempotency key.
+// provider is a fake provider recording each request's recipient, idempotency key and correlation ID.
 type provider struct {
-	mu     sync.Mutex
-	calls  map[string]int
-	keys   map[string]string
-	answer func(to string) int
-	block  chan struct{} // when set, each request waits for it to close
-	called chan string
+	mu           sync.Mutex
+	calls        map[string]int
+	keys         map[string]string
+	correlations map[string]string
+	answer       func(to string) int
+	block        chan struct{} // when set, each request waits for it to close
+	called       chan string
 }
 
 func (p *provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +62,10 @@ func (p *provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	p.calls[req.To]++
 	p.keys[req.To] = r.Header.Get("Idempotency-Key")
+	if p.correlations == nil {
+		p.correlations = map[string]string{}
+	}
+	p.correlations[req.To] = r.Header.Get(observability.CorrelationHeader)
 	p.mu.Unlock()
 	if p.called != nil {
 		p.called <- req.To
@@ -79,10 +86,35 @@ func (p *provider) count(to string) int {
 	return p.calls[to]
 }
 
+// logLines collects a process's log lines; it is safe for concurrent use.
+type logLines struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logLines) add(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, line)
+}
+
+// has reports whether one line holds every part.
+func (l *logLines) has(parts ...string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, line := range l.lines {
+		if !slices.ContainsFunc(parts, func(p string) bool { return !strings.Contains(line, p) }) {
+			return true
+		}
+	}
+	return false
+}
+
 // startWorker runs the worker against a database and a virtual host of the test's own and the given provider,
-// and returns a service to create notifications with, as the API does, and the store to inspect them. The worker
-// stops when stop is called or the test ends, and must stop cleanly.
-func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *notification.Store, ops string, stop func()) {
+// and returns a service to create notifications with, as the API does, and the store to inspect them. The worker's
+// log lines are collected in logs when it is not nil. The worker stops when stop is called or the test ends, and
+// must stop cleanly.
+func startWorker(t *testing.T, p *provider, logs *logLines) (svc *notification.Service, store *notification.Store, ops string, stop func()) {
 	t.Helper()
 	srv := httptest.NewServer(p)
 	t.Cleanup(srv.Close)
@@ -100,20 +132,23 @@ func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *n
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	logs, logsW := io.Pipe()
+	out, outW := io.Pipe()
 	go func() {
 		done <- run(ctx, nil, env(map[string]string{
 			"DATABASE_URL": dsn, "AMQP_URL": amqpURL, "PROVIDER_URL": srv.URL,
 			"PROVIDER_TIMEOUT": "2s", "SHUTDOWN_TIMEOUT": "5s", "MAX_ATTEMPTS": "2", "RETRY_BASE": "50ms",
 			"SCHEDULER_INTERVAL": "50ms", "RELAY_POLL_INTERVAL": "1s", "OPS_ADDR": "127.0.0.1:0",
-		}), logsW)
-		_ = logsW.Close()
+		}), outW)
+		_ = outW.Close()
 	}()
 	// The "worker started" line carries the operations server's address; reading goes on so logging never blocks.
 	opsAddr := make(chan string, 1)
 	go func() {
-		scanner := bufio.NewScanner(logs)
+		scanner := bufio.NewScanner(out)
 		for scanner.Scan() {
+			if logs != nil {
+				logs.add(scanner.Text())
+			}
 			var line map[string]any
 			if json.Unmarshal(scanner.Bytes(), &line) == nil && line["msg"] == "worker started" {
 				opsAddr <- line["ops_addr"].(string)
@@ -173,7 +208,7 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 		}
 		return http.StatusAccepted
 	}}
-	svc, store, ops, _ := startWorker(t, p)
+	svc, store, ops, _ := startWorker(t, p, nil)
 
 	create := func(d notification.Draft) notification.Notification {
 		n, _, err := svc.Create(t.Context(), d, "")
@@ -249,7 +284,7 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 func TestWorkerFinishesASendInFlightWhenStopped(t *testing.T) {
 	p := &provider{calls: map[string]int{}, keys: map[string]string{}, answer: func(string) int { return http.StatusAccepted },
 		block: make(chan struct{}), called: make(chan string, 1)}
-	svc, store, _, stop := startWorker(t, p)
+	svc, store, _, stop := startWorker(t, p, nil)
 
 	n, _, err := svc.Create(t.Context(), notification.Draft{To: "+905551234567", Channel: notification.ChannelSMS, Content: "x", Priority: notification.PriorityNormal}, "")
 	if err != nil {
@@ -264,5 +299,37 @@ func TestWorkerFinishesASendInFlightWhenStopped(t *testing.T) {
 
 	if got, _ := store.Get(t.Context(), n.ID); got.Status != notification.StatusSent {
 		t.Errorf("status = %s, want sent: the send in flight finished and was recorded", got.Status)
+	}
+}
+
+// TestCorrelationIDCrossesTheQueue: a notification created under a request's correlation ID, as the API creates it,
+// reaches the provider with that ID in its X-Correlation-ID header, and the worker's line about the attempt carries
+// it, so one ID finds the API's and the worker's lines about the request.
+func TestCorrelationIDCrossesTheQueue(t *testing.T) {
+	p := &provider{calls: map[string]int{}, keys: map[string]string{}, answer: func(string) int { return http.StatusAccepted }}
+	var logs logLines
+	svc, store, _, _ := startWorker(t, p, &logs)
+
+	ctx := observability.WithCorrelationID(t.Context(), "trace-me")
+	n, _, err := svc.Create(ctx, notification.Draft{
+		To: "+905551234567", Channel: notification.ChannelSMS, Content: "one", Priority: notification.PriorityNormal,
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, n.ID, notification.StatusSent)
+
+	p.mu.Lock()
+	sentWith := p.correlations["+905551234567"]
+	p.mu.Unlock()
+	if sentWith != "trace-me" {
+		t.Errorf("the provider received correlation ID %q, want trace-me", sentWith)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !logs.has(`"msg":"attempt finished"`, `"correlation_id":"trace-me"`, n.ID.String()) {
+		if time.Now().After(deadline) {
+			t.Fatal("no worker line about the attempt carries the correlation ID")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

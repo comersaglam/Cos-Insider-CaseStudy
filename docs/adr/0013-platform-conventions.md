@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-11-23
+- Amended by: [0028](0028-correlation-across-the-queue.md) (the correlation ID across the queue)
 
 ## Context
 

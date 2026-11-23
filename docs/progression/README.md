@@ -38,7 +38,8 @@ finds the commit that finished block NN.
 | [23](23-circuit-breaker.md) | Circuit breaker and pausing the pull | 2026-11-23 | The consumer stops taking messages while the provider is down, spending no attempt | `65d6795` |
 | [24](24-worker.md) | Worker composition root and an end-to-end test | 2026-11-23 | `docker compose up` sends notifications end to end, to a stand-in or to webhook.site | `840d923` |
 | [25](25-metrics.md) | Metrics | 2026-11-23 | Prometheus `/metrics` on both processes, queue depth on scrape, a JSON summary for people | `2fb8a8e` |
-| [26](26-health.md) | Health | 2026-11-23 | `/healthz` and `/readyz` on both processes; Compose waits until the service is ready | this block's commit |
+| [26](26-health.md) | Health | 2026-11-23 | `/healthz` and `/readyz` on both processes; Compose waits until the service is ready | `d369c06` |
+| [27](27-correlation-across-the-queue.md) | Correlation across the queue | 2026-11-23 | One correlation ID follows a notification from the API to the provider and the worker's log | this block's commit |
 
 ## Template
 

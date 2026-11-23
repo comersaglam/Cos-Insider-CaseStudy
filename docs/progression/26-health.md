@@ -1,7 +1,7 @@
 # 26. Health
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `d369c06`
 - Decisions: [ADR 0027](../adr/0027-health-probes.md)
 
 ## Goal

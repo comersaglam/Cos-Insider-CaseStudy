@@ -12,7 +12,8 @@ info:
     `correlationId`, and, for invalid requests, `errors` located by JSON Pointer.
 
     Every request may carry `X-Correlation-ID` (1 to 128 visible ASCII characters); every answer carries the ID
-    the request was handled under, the client's or a new one.
+    the request was handled under, the client's or a new one. A notification keeps the ID of the request that created
+    it: the worker logs its sends under it, and sends it to the provider in the same header.
 servers:
   - url: http://localhost:8080
     description: the local stack
