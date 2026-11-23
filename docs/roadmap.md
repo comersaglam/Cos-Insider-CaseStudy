@@ -44,14 +44,14 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: `TestStatusCanTransitionTo` gains the new transition.
 
 ### 14. Database and store
-- **Scope**: migrations (`notifications` with `attempts`, `claimed_until` and a failure reason, `batches`, `outbox`,
-  `delivery_attempts`, the idempotency index);
-  `platform/postgres` (pool, transaction helper, migration runner); `sqlc.yaml`; the testcontainers helper in
-  `platform/testenv`, starting `testenv.PostgresImage`; the notification store.
-- **Tests**: migrations up, down, up; every store query against real PostgreSQL.
-- **Watch**: indexes follow the queries (list filters, the scheduler's due query and the relay's unpublished query
-  as partial indexes); `timestamptz`; `NOT NULL` matches the domain.
-- **Open question**: the idempotency key's scope and lifetime; the same key with a different body (422?).
+- **Scope**: the first migration (`notifications`, `outbox`, the idempotency index); `platform/postgres` (pool,
+  migration runner); `sqlc.yaml` and `make generate`; the testcontainers helper in `platform/testenv`, giving each
+  test a copy of a migrated template database; the notification store (create with idempotency, get).
+- **Tests**: migrations rolled back and reapplied; every store query against real PostgreSQL; twenty concurrent
+  requests with one key create one notification.
+- **Decided** ([ADR 0015](adr/0015-storage-ids-and-idempotency.md)): UUID v7 made in Go; keys without expiry,
+  global; a reused key with another request is `422`; enumerations as `text` with `CHECK`; the column `recipient`;
+  each later block migrates the tables and columns it uses.
 
 ### 15. Create, get, and a running API
 - **Scope**: `POST /v1/notifications`, `GET /v1/notifications/{id}`; service; handlers; the `httpapi` router; the
@@ -66,6 +66,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Watch**: `COPY` through pgx `CopyFrom` for notifications and outbox rows.
 - **Open question**: one invalid item refuses the whole batch (atomic), or valid items are accepted and invalid
   ones reported (partial); the body size limit, since 1000 e-mails of 100,000 characters could reach 400 MB.
+- **Migration**: `batches` and `notifications.batch_id`.
 
 ### 17. List, cancel and retry
 - **Scope**: `GET /v1/notifications` with status, channel, date range and batch filters and keyset cursors;
@@ -75,6 +76,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: filter combinations; no row lost or repeated across pages when timestamps tie; cancel racing a send;
   bulk replay requeues only `failed` rows inside the window, `dryRun` changes nothing, the cap holds.
 - **Watch**: cancel is one conditional `UPDATE`, so the database settles the race; cursors are opaque.
+- **Migration**: the `(created_at, id)` index the list pages over, and the time a notification failed.
 
 ### 18. One-command stack
 - **Scope**: multi-stage Dockerfile at the root (one image, two binaries, non-root); `migrate`, `api` and `worker`
@@ -101,6 +103,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   `unknown`.
 - **Watch**: batch size; publication in priority order; the relay is at least once (a crash after the confirm
   republishes, which consumer idempotency absorbs).
+- **Migration**: `notifications.next_attempt_at` and the partial indexes of the due and unpublished queries.
 
 ### 21. Delivery: provider client
 - **Scope**: the webhook.site client (`to`, `channel`, `content`), timeout, `Idempotency-Key` and correlation
@@ -118,6 +121,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   message in flight at once send once; an expired lease is claimed again and counted as a possible duplicate;
   a message that panics ends in `failed` after its attempts; backoff bounds; the deadlock guard (a full semaphore
   with pending results); `-race`.
+- **Migration**: `attempts`, `claimed_until`, `failure_reason`, the provider's message ID, and `delivery_attempts`.
 
 ### 23. Circuit breaker and pausing the pull
 - **Scope**: `sony/gobreaker` per channel; while open the consumer takes no deliveries; half-open probe.

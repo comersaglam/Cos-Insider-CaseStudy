@@ -18,10 +18,11 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0008](0008-modular-monolith-layout.md) | Modular monolith: packages by feature, a platform layer and one central router | Accepted |
 | [0009](0009-concurrency-model.md) | Concurrency model | Accepted |
 | [0010](0010-local-environment-with-docker-compose.md) | Local environment with Docker Compose | Accepted |
-| [0011](0011-notification-domain.md) | Notification domain: the provider contract, statuses and validation | Accepted, amended by 0014 |
+| [0011](0011-notification-domain.md) | Notification domain: the provider contract, statuses and validation | Accepted, amended by 0014 and 0015 |
 | [0012](0012-message-flow-and-delivery-guarantee.md) | Message flow and delivery guarantee | Accepted |
 | [0013](0013-platform-conventions.md) | Platform conventions: configuration, logging, correlation, errors and JSON | Accepted |
 | [0014](0014-dead-letters-and-replay.md) | Dead letters and replay | Accepted |
+| [0015](0015-storage-ids-and-idempotency.md) | Storage: identifiers, idempotency and schema conventions | Accepted |
 
 ## Template
 

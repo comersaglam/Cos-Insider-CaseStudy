@@ -10,6 +10,8 @@ extension (`gopls`, format on save).
 ## Inner loop
 
 1. Write or change a test, run it alone and see it fail: `go test ./internal/<package>/... -run TestName`.
+   While working, run only the package being changed (`make test PKG=./internal/<package>/...`); when a large
+   block ends, run every package, one per command, so each result shows as it arrives.
 2. Write the code until it passes.
 3. Before committing, run the whole suite with the race detector: `make test`.
 4. Run `make lint`; the linter's findings are fixed, not silenced.
@@ -22,13 +24,14 @@ extension (`gopls`, format on save).
 |---|---|
 | `make fmt` | `gofmt` and `goimports` over the module |
 | `make lint` | `golangci-lint run`, including the architecture rules (`depguard`, [ADR 0008](adr/0008-modular-monolith-layout.md)) and doc-comment checks |
-| `make test` | every test, with `-race`; tests that need PostgreSQL start their own through testcontainers |
+| `make test` | the tests, with `-race` and a 3-minute timeout; `PKG=./internal/<package>/...` runs one package. Tests that need PostgreSQL start their own through testcontainers |
+| `make generate` | regenerates the typed query code from the SQL with `sqlc` |
 | `make build` | both binaries into `bin/` |
 | `make check` | `lint` and `test`, what CI runs |
 | `make up` | starts the local stack and waits until it is healthy |
 | `make down` | stops the local stack and keeps its data |
 
-Targets added with the parts they serve: `generate` (`sqlc`), `migrate`.
+Targets added with the parts they serve: `migrate`.
 
 ## Local stack
 
@@ -54,7 +57,8 @@ Targets added with the parts they serve: `generate` (`sqlc`), `migrate`.
 | `internal/httpapi` | the central router: the middleware chain and the one place modules are mounted |
 | `internal/<module>` | one feature: its types, use cases, handlers, storage and tests (`notification`, `delivery`, `dispatch`, `health`) |
 | `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`, and `testenv` for integration tests); its conventions are [ADR 0013](adr/0013-platform-conventions.md) |
-| `migrations` | versioned SQL migrations |
+| `migrations` | versioned SQL migrations (golang-migrate files), embedded in the binaries; each block adds the tables and columns it uses |
+| `internal/<module>/queries.sql`, `internal/<module>/internal/db` | a module's SQL and the code `sqlc` generates from it, reachable only from that module |
 | `api/openapi.yaml` | the API contract |
 | `compose.yaml`, `Dockerfile` | the local stack and the application's image, at the root where Docker looks for them; `deploy/` only for configuration files mounted into containers |
 

@@ -1,7 +1,7 @@
 # 13. Dead letters and replay
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `545e91b`
 - Decisions: [ADR 0014](../adr/0014-dead-letters-and-replay.md), amending [ADR 0007](../adr/0007-delivery-and-retry.md)
   and [ADR 0011](../adr/0011-notification-domain.md)
 

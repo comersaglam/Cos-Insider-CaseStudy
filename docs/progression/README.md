@@ -25,7 +25,8 @@ finds the commit that finished block NN.
 | [10](10-notification-domain.md) | Notification domain | 2026-11-23 | Channels, priorities, statuses and their transitions, validation per channel | `2d19a8d` |
 | [11](11-message-flow-and-delivery-guarantee.md) | Message flow and delivery guarantee | 2026-11-23 | Work queue on a direct exchange; at least once with a leased claim, a reaper and bounded poison messages | `cea7518` |
 | [12](12-platform.md) | Platform: config, observability, httpx | 2026-11-23 | Configuration reader, JSON logger with correlation IDs, RFC 9457 errors, strict JSON decoding, middleware | `8080430` |
-| [13](13-dead-letters-and-replay.md) | Dead letters and replay | 2026-11-23 | Bulk replay by filter from PostgreSQL; unprocessable messages marked `failed` | this block's commit |
+| [13](13-dead-letters-and-replay.md) | Dead letters and replay | 2026-11-23 | Bulk replay by filter from PostgreSQL; unprocessable messages marked `failed` | `545e91b` |
+| [14](14-database-and-store.md) | Database and store | 2026-11-23 | First migration, pool and migrator, per-test databases, sqlc, idempotent create | this block's commit |
 
 ## Template
 

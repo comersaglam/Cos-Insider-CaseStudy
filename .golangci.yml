@@ -17,6 +17,16 @@ linters:
         - name: package-comments
     depguard:
       rules:
+        testenv-only-in-tests:
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/platform/testenv/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/testenv
+              desc: it starts test containers; only tests import it (ADR 0015)
+            - pkg: github.com/testcontainers/testcontainers-go
+              desc: test containers belong in tests, through internal/platform/testenv (ADR 0015)
         platform-imports-no-module:
           files:
             - "**/internal/platform/**"

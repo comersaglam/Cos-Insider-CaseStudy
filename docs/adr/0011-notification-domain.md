@@ -1,6 +1,7 @@
 # 0011. Notification domain: the provider contract, statuses and validation
 
-- Status: Accepted; amended by [0014](0014-dead-letters-and-replay.md) (`queued` → `failed`)
+- Status: Accepted; amended by [0014](0014-dead-letters-and-replay.md) (`queued` → `failed`) and
+  [0015](0015-storage-ids-and-idempotency.md) (the `recipient` column)
 - Date: 2026-11-23
 
 ## Context

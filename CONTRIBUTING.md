@@ -6,7 +6,9 @@ What the code and its tests already say is not repeated here.
 ## Workflow
 
 - **Work in blocks.** A block is one piece of work that can be checked on its own. It ends with its tests
-  green and one commit. A small block runs the tests of the packages it touched; a large one runs `make test`.
+  green and one commit. While working, only the tests of the package being changed run
+  (`make test PKG=./internal/<package>/...`). The whole suite runs when a large block ends, one package per run,
+  so each result is seen as it arrives and a hang shows at once.
 - **Tests first.** A block's tests are written before its code and seen failing for the right reason, then
   made to pass.
 - **Commit only your own paths**: `git commit -- <paths>`, never a bare `git commit` over a shared index.

@@ -1,0 +1,28 @@
+# sqlc turns the queries of each module into typed Go (ADR 0001). The schema is read from the golang-migrate
+# files; sqlc applies the .up.sql files and ignores the .down.sql files. Generated code is committed and
+# regenerated with `make generate`.
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/notification/queries.sql
+    gen:
+      go:
+        package: db
+        # internal/: only the notification module can reach its own tables.
+        out: internal/notification/internal/db
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        overrides:
+          - db_type: uuid
+            go_type:
+              import: uuid
+              type: UUID
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true

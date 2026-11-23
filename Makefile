@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help fmt lint test build check up down
+.PHONY: help fmt lint test build check generate up down
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -11,13 +11,20 @@ fmt: ## Format the code (gofmt, goimports)
 lint: ## Run the linters, including the architecture rules (depguard)
 	golangci-lint run ./...
 
-test: ## Run every test with the race detector
-	go test -race ./...
+# A hung test fails after TEST_TIMEOUT instead of Go's default of ten minutes.
+PKG ?= ./...
+TEST_TIMEOUT ?= 3m
+
+test: ## Run the tests with the race detector; one package with PKG=./internal/notification/...
+	go test -race -timeout $(TEST_TIMEOUT) $(PKG)
 
 build: ## Build both binaries into bin/
 	go build -o bin/ ./cmd/...
 
 check: lint test ## Everything CI runs
+
+generate: ## Regenerate the typed query code from the SQL (sqlc)
+	sqlc generate
 
 up: ## Start PostgreSQL and RabbitMQ and wait until they are healthy
 	docker compose up --detach --wait
