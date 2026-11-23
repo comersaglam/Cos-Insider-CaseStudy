@@ -16,14 +16,28 @@ extension (`gopls`, format on save).
 
 ## Make targets
 
+`make` alone lists the targets.
+
 | Target | What it does |
 |---|---|
 | `make fmt` | `gofmt` and `goimports` over the module |
-| `make lint` | `golangci-lint run` |
-| `make generate` | `sqlc generate` |
-| `make test` | every test, with `-race`; starts its own PostgreSQL through testcontainers |
-| `make up` / `make down` | the full stack with Docker Compose |
-| `make migrate` | applies the migrations to the Compose database |
+| `make lint` | `golangci-lint run`, including the architecture rules (`depguard`, [ADR 0008](adr/0008-modular-monolith-layout.md)) and doc-comment checks |
+| `make test` | every test, with `-race`; tests that need PostgreSQL start their own through testcontainers |
+| `make build` | both binaries into `bin/` |
+| `make check` | `lint` and `test`, what CI runs |
+
+Targets added with the parts they serve: `generate` (`sqlc`), `up` / `down` (Docker Compose), `migrate`.
+
+## Where code goes
+
+| Path | Holds |
+|---|---|
+| `cmd/api`, `cmd/worker` | composition roots: configuration, platform clients and modules are built and connected here |
+| `internal/httpapi` | the central router: the middleware chain and the one place modules are mounted |
+| `internal/<module>` | one feature: its types, use cases, handlers, storage and tests (`notification`, `delivery`, `dispatch`, `health`) |
+| `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`) |
+| `migrations` | versioned SQL migrations |
+| `api/openapi.yaml` | the API contract |
 
 ## Go practices this codebase relies on
 

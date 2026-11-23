@@ -1,0 +1,64 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - depguard
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    depguard:
+      rules:
+        platform-imports-no-module:
+          files:
+            - "**/internal/platform/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification
+              desc: platform carries no business meaning and imports no module (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery
+              desc: platform carries no business meaning and imports no module (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch
+              desc: platform carries no business meaning and imports no module (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/health
+              desc: platform carries no business meaning and imports no module (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi
+              desc: platform carries no business meaning and imports no module (ADR 0008)
+        notification-imports-no-module:
+          files:
+            - "**/internal/notification/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery
+              desc: notification depends on no other module; delivery depends on it (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch
+              desc: notification depends on no other module; dispatch depends on it (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi
+              desc: modules are mounted by httpapi, never the reverse (ADR 0008)
+        delivery-does-not-import-dispatch:
+          files:
+            - "**/internal/delivery/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch
+              desc: delivery and dispatch are independent modules (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi
+              desc: modules are mounted by httpapi, never the reverse (ADR 0008)
+        dispatch-does-not-import-delivery:
+          files:
+            - "**/internal/dispatch/**"
+          deny:
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery
+              desc: delivery and dispatch are independent modules (ADR 0008)
+            - pkg: github.com/comersaglam/Cos-Insider-CaseStudy/internal/httpapi
+              desc: modules are mounted by httpapi, never the reverse (ADR 0008)
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

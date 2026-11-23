@@ -49,9 +49,10 @@ who decided something or when.
 - **Comments follow Go convention.** Every package has a package comment and every exported identifier has a
   doc comment that starts with its name (enforced by the linter). Inside a function a comment says *why*,
   never *what*. Tutorial-style explanations do not belong in code.
-- **Layers point inward**: `api` (HTTP handlers) → `service` (business rules) → `store` (SQL); every layer may
-  import `domain`, and `domain` imports nothing of ours. A handler reads the request and writes the answer; it
-  holds no business rule.
+- **Modules by feature** ([ADR 0008](docs/adr/0008-modular-monolith-layout.md)): each module under `internal/`
+  holds its domain types, use cases, handlers and storage; `internal/platform` holds infrastructure with no
+  business meaning; `internal/httpapi` is the one place modules are mounted. The import rules are enforced by
+  `depguard`. Inside a module a handler reads the request and writes the answer and holds no business rule.
 - **Required means the same in every layer**: a field that `Validate()` requires is in the OpenAPI schema's
   `required` list and is `NOT NULL` in the database, and the other way round.
 - **One clock**: every moment is stored as `timestamptz` in UTC and sent as ISO 8601 UTC.
