@@ -33,7 +33,8 @@ finds the commit that finished block NN.
 | [18](18-one-command-stack.md) | One-command stack | 2026-11-23 | A 23.5 MB distroless image; `docker compose up` migrates and serves the API | `b569c52` |
 | [19](19-rabbitmq-platform.md) | Platform: RabbitMQ | 2026-11-23 | Topology, confirmed mandatory publishing and consuming, tested against RabbitMQ 4.4.1 | `f1fb6b4` |
 | [20](20-outbox-relay-and-scheduler.md) | Dispatch: outbox relay and scheduler | 2026-11-23 | Outbox rows reach RabbitMQ at commit, woken by NOTIFY; due work is queued | `825c4bc` |
-| [21](21-provider-client.md) | Delivery: provider client | 2026-11-23 | One attempt to the provider, every answer classified | this block's commit |
+| [21](21-provider-client.md) | Delivery: provider client | 2026-11-23 | One attempt to the provider, every answer classified | `f632ea1` |
+| [22](22-the-consumer.md) | Delivery: consumer, rate limit, sending and retry | 2026-11-23 | Claim, send, record and retry under a rate and a bound; the reaper; a deadlock in ADR 0009 found and fixed | this block's commit |
 
 ## Template
 

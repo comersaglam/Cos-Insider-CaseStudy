@@ -87,17 +87,20 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Notification, error) {
 // works in UTC.
 func fromRow(r db.Notification) Notification {
 	return Notification{
-		ID:            r.ID,
-		To:            r.Recipient,
-		Channel:       Channel(r.Channel),
-		Content:       r.Content,
-		Priority:      Priority(r.Priority),
-		Status:        Status(r.Status),
-		CorrelationID: r.CorrelationID,
-		BatchID:       r.BatchID,
-		FailedAt:      utc(r.FailedAt),
-		CreatedAt:     r.CreatedAt.UTC(),
-		UpdatedAt:     r.UpdatedAt.UTC(),
+		ID:                r.ID,
+		To:                r.Recipient,
+		Channel:           Channel(r.Channel),
+		Content:           r.Content,
+		Priority:          Priority(r.Priority),
+		Status:            Status(r.Status),
+		CorrelationID:     r.CorrelationID,
+		BatchID:           r.BatchID,
+		FailedAt:          utc(r.FailedAt),
+		Attempts:          r.Attempts,
+		FailureReason:     FailureReason(deref(r.FailureReason)),
+		ProviderMessageID: deref(r.ProviderMessageID),
+		CreatedAt:         r.CreatedAt.UTC(),
+		UpdatedAt:         r.UpdatedAt.UTC(),
 	}
 }
 
@@ -108,4 +111,12 @@ func utc(t *time.Time) *time.Time {
 	}
 	u := t.UTC()
 	return &u
+}
+
+// deref returns *s, or "" for nil.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

@@ -158,7 +158,7 @@ func TestCreateAcceptsANotification(t *testing.T) {
 	want := map[string]any{
 		"id": stored.ID.String(), "to": "+905551234567", "channel": "sms", "content": "Your order has shipped.",
 		"priority": "normal", "status": "queued", "correlationId": "corr-1",
-		"createdAt": "2026-11-23T12:00:00Z", "updatedAt": "2026-11-23T12:00:00Z",
+		"createdAt": "2026-11-23T12:00:00Z", "updatedAt": "2026-11-23T12:00:00Z", "attempts": float64(0),
 	}
 	got := body(t, rec)
 	for k, v := range want {

@@ -431,7 +431,7 @@ components:
 
     Notification:
       type: object
-      required: [id, to, channel, content, priority, status, correlationId, createdAt, updatedAt]
+      required: [id, to, channel, content, priority, status, correlationId, attempts, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid, description: 'A version 7 UUID; it sorts by creation time.' }
         to: { type: string }
@@ -442,6 +442,12 @@ components:
         correlationId: { type: string }
         batchId: { type: string, format: uuid, description: 'The batch it came in, when it came in one.' }
         failedAt: { type: string, format: date-time, description: 'When it failed, while it is failed (UTC).' }
+        attempts: { type: integer, description: 'Attempts spent since it was created or last retried by hand.' }
+        failureReason:
+          type: string
+          enum: [provider_rejected, attempts_exhausted, unprocessable_message]
+          description: Why it failed, while it is failed.
+        providerMessageId: { type: string, description: "The provider's ID for the message, once sent." }
         createdAt: { type: string, format: date-time, description: 'UTC' }
         updatedAt: { type: string, format: date-time, description: 'UTC' }
 

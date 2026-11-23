@@ -273,7 +273,7 @@ func TestAPIListCancelRetryEndToEnd(t *testing.T) {
 		}
 	}
 
-	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', failed_at = now() WHERE id = $1", email); err != nil {
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', failed_at = now(), failure_reason = 'attempts_exhausted' WHERE id = $1", email); err != nil {
 		t.Fatal(err)
 	}
 	if status, _, n := call(t, http.MethodPost, base+"/v1/notifications/"+email+"/retry", "", nil); status != 202 || n["status"] != "queued" {
@@ -283,7 +283,7 @@ func TestAPIListCancelRetryEndToEnd(t *testing.T) {
 		t.Errorf("retrying a queued notification = %d %v", status, p)
 	}
 
-	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', failed_at = '2026-11-23T10:30:00Z' WHERE id = $1", email); err != nil {
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', failed_at = '2026-11-23T10:30:00Z', failure_reason = 'attempts_exhausted' WHERE id = $1", email); err != nil {
 		t.Fatal(err)
 	}
 	window := `{"failedFrom":"2026-11-23T10:00:00Z","failedTo":"2026-11-23T11:00:00Z"`

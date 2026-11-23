@@ -21,22 +21,37 @@ type Batch struct {
 	CreatedAt      time.Time
 }
 
-type Notification struct {
-	ID             uuid.UUID
-	Channel        string
-	Recipient      string
-	Content        string
-	Priority       string
-	Status         string
-	IdempotencyKey *string
-	RequestHash    []byte
-	CorrelationID  string
+type DeliveryAttempt struct {
+	ID             int64
+	NotificationID uuid.UUID
+	Attempt        int
+	Outcome        string
+	StatusCode     *int
+	Error          *string
+	DurationMs     int
 	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	BatchID        *uuid.UUID
-	BatchIndex     *int
-	FailedAt       *time.Time
-	NextAttemptAt  *time.Time
+}
+
+type Notification struct {
+	ID                uuid.UUID
+	Channel           string
+	Recipient         string
+	Content           string
+	Priority          string
+	Status            string
+	IdempotencyKey    *string
+	RequestHash       []byte
+	CorrelationID     string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	BatchID           *uuid.UUID
+	BatchIndex        *int
+	FailedAt          *time.Time
+	NextAttemptAt     *time.Time
+	Attempts          int
+	ClaimedUntil      *time.Time
+	FailureReason     *string
+	ProviderMessageID *string
 }
 
 type Outbox struct {

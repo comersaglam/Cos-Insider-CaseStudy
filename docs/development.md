@@ -14,7 +14,8 @@ extension (`gopls`, format on save).
    block ends, run every package, one per command, so each result shows as it arrives.
 2. Write the code until it passes.
 3. Before committing, run the whole suite with the race detector: `make test`.
-4. Run `make lint`; the linter's findings are fixed, not silenced.
+4. Run `make lint`; the linter's findings are fixed, not silenced. A false positive is the one exception: it is
+   silenced on its own line with the reason (`//nolint:gosec // G404: jitter, not a secret`).
 
 ## Make targets
 

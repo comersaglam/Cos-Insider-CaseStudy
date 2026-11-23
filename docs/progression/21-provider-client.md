@@ -1,7 +1,7 @@
 # 21. Delivery: provider client
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `f632ea1`
 - Decisions: [ADR 0022](../adr/0022-provider-client.md), applying [ADR 0007](../adr/0007-delivery-and-retry.md)
 
 ## Goal

@@ -1,6 +1,6 @@
 # 0009. Concurrency model
 
-- Status: Accepted
+- Status: Accepted; amended by [0023](0023-the-consumer.md) (the bound on sends in flight: the buffered results channel alone deadlocks)
 - Date: 2026-11-23
 
 ## Context

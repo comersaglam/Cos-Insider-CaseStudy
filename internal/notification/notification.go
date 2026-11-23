@@ -17,8 +17,12 @@ type Notification struct {
 	CorrelationID string
 	BatchID       *uuid.UUID // the batch it came in, or nil
 	FailedAt      *time.Time // when it failed, while it is failed
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	Attempts      int        // attempts spent since it was created or last retried by hand
+	FailureReason FailureReason
+	// ProviderMessageID is the provider's ID for the message, once sent.
+	ProviderMessageID string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // ErrNotFound reports that no notification has the requested ID.

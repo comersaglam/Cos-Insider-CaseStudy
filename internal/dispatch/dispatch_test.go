@@ -257,7 +257,7 @@ func TestSchedulerQueuesWhatIsDue(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10}, discard).Run(ctx)
+		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, discard).Run(ctx)
 	}()
 	waitFor(t, "the due notification to be queued", func() bool {
 		n, err := store.Get(t.Context(), due.ID)
@@ -279,15 +279,50 @@ func (brokenStore) QueueDue(context.Context, int) (int, error) {
 	return 0, errors.New("connection lost")
 }
 
+func (brokenStore) ReapExpiredClaims(context.Context, int, int) (int, error) {
+	return 0, errors.New("connection lost")
+}
+
 func (brokenStore) DrainOutbox(context.Context, int, func(context.Context, []notification.OutboxEntry) error) (int, error) {
 	return 0, errors.New("connection lost")
 }
 
 func TestLoopsStopWithTheDatabaseError(t *testing.T) {
-	if err := NewScheduler(brokenStore{}, SchedulerConfig{Interval: time.Second, BatchSize: 10}, discard).Run(t.Context()); err == nil {
+	if err := NewScheduler(brokenStore{}, SchedulerConfig{Interval: time.Second, BatchSize: 10, MaxAttempts: 8}, discard).Run(t.Context()); err == nil {
 		t.Error("scheduler: Run = nil, want the database error")
 	}
 	if err := NewRelay(brokenStore{}, noWait{}, &recordingPublisher{}, RelayConfig{BatchSize: 10, PollInterval: time.Second}, discard).Run(t.Context()); err == nil {
 		t.Error("relay: Run = nil, want the database error")
+	}
+}
+
+// TestSchedulerReapsALostWorkersNotification: a worker claimed a notification and was lost; once its lease runs out
+// the scheduler records the attempt as unknown and queues the notification again (ADR 0012).
+func TestSchedulerReapsALostWorkersNotification(t *testing.T) {
+	t.Parallel()
+	store, pool := newStore(t)
+	n := create(t, store, notification.ChannelSMS, "+905551234567", notification.PriorityNormal)
+	if _, err := store.Claim(t.Context(), n.ID, time.Minute, 8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET claimed_until = now() - interval '1 second' WHERE id = $1", n.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, stop := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, discard).Run(ctx)
+	}()
+	waitFor(t, "the lost notification to be queued again", func() bool {
+		got, err := store.Get(t.Context(), n.ID)
+		return err == nil && got.Status == notification.StatusQueued
+	})
+	stop()
+	if err := <-done; err != nil {
+		t.Errorf("Run = %v, want nil", err)
+	}
+	if records, _ := store.Attempts(t.Context(), n.ID); len(records) != 1 || records[0].Outcome != notification.OutcomeUnknown {
+		t.Errorf("records = %+v, want the lost attempt as unknown", records)
 	}
 }

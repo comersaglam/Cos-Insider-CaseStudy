@@ -8,6 +8,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.17.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.45.0
 	github.com/testcontainers/testcontainers-go/modules/rabbitmq v0.45.0
+	golang.org/x/time v0.16.0
 )
 
 require (

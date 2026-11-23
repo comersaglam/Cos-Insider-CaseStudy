@@ -24,15 +24,18 @@ func mustCreate(t *testing.T, store *Store, n Notification) Notification {
 // fail marks a notification failed at the given time, as the worker will.
 func fail(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, at time.Time) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'failed', failed_at = $2 WHERE id = $1", id, at); err != nil {
+	if _, err := pool.Exec(t.Context(),
+		"UPDATE notifications SET status = 'failed', failed_at = $2, failure_reason = 'attempts_exhausted' WHERE id = $1", id, at); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// setStatus moves a notification to a status that needs no other column, as a worker or the scheduler will.
+// setStatus moves a notification to sent, or to sending under a lease of a minute, as a worker will.
 func setStatus(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, s Status) {
 	t.Helper()
-	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = $2 WHERE id = $1", id, string(s)); err != nil {
+	if _, err := pool.Exec(t.Context(),
+		"UPDATE notifications SET status = $2, claimed_until = CASE WHEN $2 = 'sending' THEN now() + interval '1 minute' END WHERE id = $1",
+		id, string(s)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -169,7 +172,8 @@ func TestStoreCancelRacingAClaim(t *testing.T) {
 		)
 		wg.Go(func() { _, cancelErr = store.Cancel(t.Context(), n.ID) })
 		wg.Go(func() {
-			tag, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'sending' WHERE id = $1 AND status = 'queued'", n.ID)
+			tag, err := pool.Exec(t.Context(),
+				"UPDATE notifications SET status = 'sending', claimed_until = now() + interval '1 minute' WHERE id = $1 AND status = 'queued'", n.ID)
 			if err != nil {
 				t.Error(err)
 			}

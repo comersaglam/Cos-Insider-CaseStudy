@@ -87,17 +87,20 @@ func idempotencyKey(r *http.Request) (string, error) {
 
 // notificationResponse is a notification as the API shows it.
 type notificationResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	To            string     `json:"to"`
-	Channel       Channel    `json:"channel"`
-	Content       string     `json:"content"`
-	Priority      Priority   `json:"priority"`
-	Status        Status     `json:"status"`
-	CorrelationID string     `json:"correlationId"`
-	BatchID       *uuid.UUID `json:"batchId,omitzero"`
-	FailedAt      *time.Time `json:"failedAt,omitzero"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID                uuid.UUID     `json:"id"`
+	To                string        `json:"to"`
+	Channel           Channel       `json:"channel"`
+	Content           string        `json:"content"`
+	Priority          Priority      `json:"priority"`
+	Status            Status        `json:"status"`
+	CorrelationID     string        `json:"correlationId"`
+	BatchID           *uuid.UUID    `json:"batchId,omitzero"`
+	FailedAt          *time.Time    `json:"failedAt,omitzero"`
+	Attempts          int           `json:"attempts"`
+	FailureReason     FailureReason `json:"failureReason,omitzero"`
+	ProviderMessageID string        `json:"providerMessageId,omitzero"`
+	CreatedAt         time.Time     `json:"createdAt"`
+	UpdatedAt         time.Time     `json:"updatedAt"`
 }
 
 // toResponse converts n field by field; struct tags do not take part in a conversion. A field added to

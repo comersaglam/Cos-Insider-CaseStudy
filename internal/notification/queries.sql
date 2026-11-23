@@ -69,7 +69,8 @@ RETURNING *;
 
 -- name: RequeueFailedNotification :one
 -- Puts a failed notification back in the queue; returns no row when it is not failed.
-UPDATE notifications SET status = 'queued', failed_at = NULL, updated_at = now()
+UPDATE notifications
+SET status = 'queued', failed_at = NULL, failure_reason = NULL, attempts = 0, updated_at = now()
 WHERE id = @id AND status = 'failed'
 RETURNING *;
 
@@ -93,7 +94,8 @@ WITH picked AS (
     LIMIT sqlc.arg(max_rows)::integer
     FOR UPDATE SKIP LOCKED
 ), requeued AS (
-    UPDATE notifications n SET status = 'queued', failed_at = NULL, updated_at = now()
+    UPDATE notifications n
+    SET status = 'queued', failed_at = NULL, failure_reason = NULL, attempts = 0, updated_at = now()
     FROM picked WHERE n.id = picked.id
     RETURNING n.id
 )
@@ -127,3 +129,67 @@ WITH due AS (
     RETURNING n.id
 )
 INSERT INTO outbox (notification_id) SELECT id FROM queued;
+
+-- name: ClaimNotification :one
+-- Claims a notification for sending (ADR 0012): one that is queued, or sending under a lease that ran out, while
+-- it has attempts left. Spends an attempt and sets the lease. previous_status tells a first claim from a takeover.
+WITH current AS (
+    SELECT c.id, c.status FROM notifications c WHERE c.id = @id FOR UPDATE
+)
+UPDATE notifications n
+SET status = 'sending', claimed_until = now() + sqlc.arg(lease_ms)::integer * interval '1 millisecond',
+    attempts = n.attempts + 1, updated_at = now()
+FROM current
+WHERE n.id = current.id
+  AND n.attempts < sqlc.arg(max_attempts)::integer
+  AND (n.status = 'queued' OR (n.status = 'sending' AND n.claimed_until < now()))
+RETURNING sqlc.embed(n), current.status AS previous_status;
+
+-- name: InsertDeliveryAttempt :exec
+INSERT INTO delivery_attempts (notification_id, attempt, outcome, status_code, error, duration_ms)
+VALUES (@notification_id, @attempt, @outcome, sqlc.narg(status_code), sqlc.narg(error), @duration_ms);
+
+-- name: FinishSending :execrows
+-- Records what became of a claimed notification, if the claim is still the one that made the attempt.
+UPDATE notifications
+SET status = @status,
+    claimed_until = NULL,
+    next_attempt_at = sqlc.narg(next_attempt_at),
+    failure_reason = sqlc.narg(failure_reason),
+    failed_at = CASE WHEN @status = 'failed' THEN now() END,
+    provider_message_id = coalesce(sqlc.narg(provider_message_id), provider_message_id),
+    updated_at = now()
+WHERE id = @id AND status = 'sending' AND attempts = @attempt;
+
+-- name: MarkUnprocessable :exec
+-- Fails a queued notification whose message cannot be processed (ADR 0014).
+UPDATE notifications
+SET status = 'failed', failure_reason = 'unprocessable_message', failed_at = now(), updated_at = now()
+WHERE id = @id AND status = 'queued';
+
+-- name: ReapExpiredClaims :execrows
+-- Returns notifications whose worker's lease ran out to retrying, due at once, or to failed when no attempt is
+-- left, recording the attempt the lost worker made as unknown (ADR 0012).
+WITH expired AS (
+    SELECT e.id, e.attempts FROM notifications e
+    WHERE e.status = 'sending' AND e.claimed_until < now()
+    ORDER BY e.claimed_until
+    LIMIT sqlc.arg(batch_size)::integer
+    FOR UPDATE SKIP LOCKED
+), recorded AS (
+    INSERT INTO delivery_attempts (notification_id, attempt, outcome, error, duration_ms)
+    SELECT expired.id, expired.attempts, 'unknown', 'the worker that claimed it stopped before recording an outcome', 0
+    FROM expired
+)
+UPDATE notifications n
+SET status = CASE WHEN expired.attempts >= sqlc.arg(max_attempts)::integer THEN 'failed' ELSE 'retrying' END,
+    claimed_until = NULL,
+    next_attempt_at = CASE WHEN expired.attempts >= sqlc.arg(max_attempts)::integer THEN NULL ELSE now() END,
+    failure_reason = CASE WHEN expired.attempts >= sqlc.arg(max_attempts)::integer THEN 'attempts_exhausted' END,
+    failed_at = CASE WHEN expired.attempts >= sqlc.arg(max_attempts)::integer THEN now() END,
+    updated_at = now()
+FROM expired
+WHERE n.id = expired.id;
+
+-- name: ListDeliveryAttempts :many
+SELECT * FROM delivery_attempts WHERE notification_id = @notification_id ORDER BY attempt, id;

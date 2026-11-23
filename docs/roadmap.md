@@ -137,6 +137,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   `retrying` or `failed`, recording the attempt as `unknown` ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
 - **Migration**: `attempts`, `claimed_until`, `failure_reason`, the provider's message ID, and `delivery_attempts`.
   Single and bulk retry then reset `attempts` as they requeue.
+- **Decided** ([ADR 0023](adr/0023-the-consumer.md)): the loop counts sends until their result is settled and
+  takes no message at full concurrency, which corrects ADR 0009's deadlock guard; every handled message is
+  acknowledged; a panic costs an attempt; stopping lets sends in flight finish.
 
 ### 23. Circuit breaker and pausing the pull
 - **Scope**: `sony/gobreaker` per channel; while open the consumer takes no deliveries; half-open probe.
