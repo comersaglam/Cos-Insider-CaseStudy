@@ -106,6 +106,8 @@ type Message struct {
 	Body          []byte
 	Priority      uint8
 	CorrelationID string
+	// Headers are more AMQP headers, such as the trace's traceparent (ADR 0034).
+	Headers map[string]string
 }
 
 // Publisher publishes persistent messages on a channel of its own, in confirm mode, and reports a message only
@@ -157,8 +159,14 @@ func (p *Publisher) publishBatch(ctx context.Context, msgs []Message) error {
 			Timestamp:    time.Now().UTC(),
 			Body:         m.Body,
 		}
-		if m.CorrelationID != "" {
-			pub.Headers = amqp.Table{CorrelationHeader: m.CorrelationID}
+		if m.CorrelationID != "" || len(m.Headers) > 0 {
+			pub.Headers = amqp.Table{}
+			for k, v := range m.Headers {
+				pub.Headers[k] = v
+			}
+			if m.CorrelationID != "" {
+				pub.Headers[CorrelationHeader] = m.CorrelationID
+			}
 		}
 		dc, err := p.ch.PublishWithDeferredConfirmWithContext(ctx, m.Exchange, m.RoutingKey, true, false, pub)
 		if err != nil {

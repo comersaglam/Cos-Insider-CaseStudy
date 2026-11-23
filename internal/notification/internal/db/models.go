@@ -54,6 +54,7 @@ type Notification struct {
 	ProviderMessageID *string
 	ScheduledAt       *time.Time
 	TemplateID        *uuid.UUID
+	TraceParent       *string
 }
 
 type Outbox struct {

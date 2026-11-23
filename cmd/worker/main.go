@@ -29,6 +29,9 @@
 //	SCHEDULER_INTERVAL   how often due work is queued and lost work reaped (default 1s)
 //	SHUTDOWN_TIMEOUT     how long sends in flight may take to finish when stopping (default 15s)
 //	OPS_ADDR             where the operations server serves /metrics, /healthz and /readyz (default :9090)
+//	OTEL_EXPORTER_OTLP_ENDPOINT  base URL of an OTLP/HTTP trace receiver, such as http://jaeger:4318; unset, spans
+//	                     are not exported, though traces still propagate (ADR 0034). OTEL_TRACES_SAMPLER and
+//	                     OTEL_TRACES_SAMPLER_ARG choose the sampling, every trace by default.
 package main
 
 import (
@@ -129,11 +132,17 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	schedulerInterval := cfg.Duration("SCHEDULER_INTERVAL", time.Second)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
 	opsAddr := cfg.String("OPS_ADDR", defaultOpsAddr)
+	tracesEndpoint := cfg.String("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	if err := cfg.Err(); err != nil {
 		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
 	log := observability.NewLogger(stdout, level)
 	log.InfoContext(ctx, "configuration loaded", "config", cfg)
+	stopTracing, err := observability.SetupTracing(ctx, "notifications-worker", tracesEndpoint)
+	if err != nil {
+		return err
+	}
+	defer flushTraces(ctx, stopTracing)
 
 	// Opened in this order and closed in the reverse, once every loop has stopped: consumers' channels, the
 	// publisher, the listener, the RabbitMQ connection, the database pool (ADR 0009).
@@ -249,4 +258,14 @@ func declare(conn *amqp.Connection, top rabbitmq.Topology) error {
 	}
 	defer func() { _ = ch.Close() }()
 	return rabbitmq.Declare(ch, top)
+}
+
+// tracesFlushTimeout bounds the export of the last spans when the process stops.
+const tracesFlushTimeout = 5 * time.Second
+
+// flushTraces exports the spans still buffered, within tracesFlushTimeout, after ctx has ended.
+func flushTraces(ctx context.Context, stop func(context.Context) error) {
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), tracesFlushTimeout)
+	defer cancel()
+	_ = stop(flushCtx)
 }

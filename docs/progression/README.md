@@ -45,7 +45,8 @@ finds the commit that finished block NN.
 | [30](30-ci.md) | CI | 2026-11-23 | Lint, test and image build on every push; the image published on a version tag | `f4f7589` |
 | [31](31-scheduled-notifications.md) | Scheduled notifications | 2026-11-23 | `scheduledAt` up to 30 days ahead; the notification waits in PostgreSQL and is sent when due | `b7813f9` |
 | [32](32-templates.md) | Templates | 2026-11-24 | `/v1/templates` with `{{.name}}` placeholders only; notifications rendered from them when created | `fffbbb0` |
-| [33](33-status-updates.md) | Status updates over WebSocket | 2026-11-24 | `/v1/status-updates` follows notifications and batches, fed by a status trigger | this block's commit |
+| [33](33-status-updates.md) | Status updates over WebSocket | 2026-11-24 | `/v1/status-updates` follows notifications and batches, fed by a status trigger | `5389db4` |
+| [34](34-distributed-tracing.md) | Distributed tracing | 2026-11-24 | One OpenTelemetry trace per notification, from the request to its last attempt; Jaeger in Compose | this block's commit |
 
 ## Template
 

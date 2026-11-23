@@ -12,6 +12,8 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel/trace"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
@@ -419,5 +421,30 @@ func TestConsumerLogsUnderTheMessagesCorrelationID(t *testing.T) {
 				t.Errorf("correlation in the log = %v, want %v:\n%s", !tt.want, tt.want, logs.String())
 			}
 		})
+	}
+}
+
+// traceSender records the trace each send ran in.
+type traceSender struct {
+	traces chan trace.TraceID
+}
+
+func (s traceSender) Send(ctx context.Context, _ notification.Notification) Outcome {
+	s.traces <- trace.SpanContextFromContext(ctx).TraceID()
+	return Outcome{Class: Success, StatusCode: 202}
+}
+
+// TestConsumerSendsInTheMessagesTrace: the trace the relay put in the message's headers is the trace of the send.
+func TestConsumerSendsInTheMessagesTrace(t *testing.T) {
+	var a acks
+	sender := traceSender{traces: make(chan trace.TraceID, 1)}
+	c := NewConsumer(&fakeStore{}, sender, testConfig(), testMetrics(), discard)
+	d := message(t)
+	d.Headers = amqp.Table{"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+	if err := runUntilSettled(t, c, deliveriesOf(&a, d), &a, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-sender.traces; got.String() != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("sent in trace %s, want the message's", got)
 	}
 }

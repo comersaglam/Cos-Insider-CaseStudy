@@ -11,6 +11,8 @@ name: notifications
 x-app-env: &app-env
   DATABASE_URL: postgres://${POSTGRES_USER:-notifications}:${POSTGRES_PASSWORD:-notifications}@postgres:5432/${POSTGRES_DB:-notifications}?sslmode=disable
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  # Spans go to Jaeger (ADR 0034); remove it to export none.
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
 
 x-app: &app
   build: .
@@ -123,6 +125,13 @@ services:
       - ./deploy/wiremock/mappings:/home/wiremock/mappings:ro
     ports:
       - "127.0.0.1:${PROVIDER_PORT:-8081}:8080"
+
+  # Traces (ADR 0034): Jaeger receives the API's and the worker's spans over OTLP/HTTP on 4318, inside the network, and
+  # shows them at http://localhost:16686. It keeps them in memory: a restart forgets them.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    ports:
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
 
 volumes:
   postgres-data:

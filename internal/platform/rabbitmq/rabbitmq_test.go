@@ -10,7 +10,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel/trace"
 
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/testenv"
 )
@@ -172,6 +174,7 @@ func TestPublishedMessagesCarryTheirProperties(t *testing.T) {
 	defer func() { _ = pub.Close() }()
 	if err := pub.Publish(t.Context(), rabbitmq.Message{
 		Exchange: top.Exchange, RoutingKey: "sms", ID: "n1", Body: []byte(`{"id":"n1"}`), Priority: 2, CorrelationID: "c-9",
+		Headers: map[string]string{"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +187,8 @@ func TestPublishedMessagesCarryTheirProperties(t *testing.T) {
 	}
 	d := got[0]
 	if d.MessageId != "n1" || d.Priority != 2 || d.DeliveryMode != amqp.Persistent ||
-		d.ContentType != "application/json" || d.Headers[rabbitmq.CorrelationHeader] != "c-9" || d.Timestamp.IsZero() {
+		d.ContentType != "application/json" || d.Headers[rabbitmq.CorrelationHeader] != "c-9" || d.Timestamp.IsZero() ||
+		d.Headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" {
 		t.Errorf("delivery = id %q priority %d mode %d type %q headers %v time %v",
 			d.MessageId, d.Priority, d.DeliveryMode, d.ContentType, d.Headers, d.Timestamp)
 	}
@@ -372,5 +376,26 @@ notifications_rabbitmq_queue_messages{queue="` + top.Queues[0].Name + `"} 2
 `
 	if err := testutil.CollectAndCompare(c, strings.NewReader(want)); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestHeaderCarrierCarriesATrace: a trace injected into a message's headers is extracted from them, as the relay
+// and the consumer do (ADR 0034).
+func TestHeaderCarrierCarriesATrace(t *testing.T) {
+	tid, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	sid, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	sent := trace.NewSpanContext(trace.SpanContextConfig{TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled})
+
+	headers := amqp.Table{"X-Correlation-ID": "c-9"}
+	observability.Propagator().Inject(trace.ContextWithSpanContext(context.Background(), sent), rabbitmq.HeaderCarrier(headers))
+	if headers["traceparent"] != "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" {
+		t.Fatalf("headers = %v", headers)
+	}
+	got := trace.SpanContextFromContext(observability.Propagator().Extract(context.Background(), rabbitmq.HeaderCarrier(headers)))
+	if got.TraceID() != tid || got.SpanID() != sid || !got.IsRemote() {
+		t.Errorf("extracted %+v", got)
+	}
+	if keys := rabbitmq.HeaderCarrier(headers).Keys(); len(keys) != 2 {
+		t.Errorf("keys = %v", keys)
 	}
 }

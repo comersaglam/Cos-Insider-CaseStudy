@@ -18,6 +18,9 @@
 //	LOG_LEVEL          debug, info, warn or error (default info)
 //	SHUTDOWN_TIMEOUT   how long requests in flight may take to finish when stopping (default 15s)
 //	BATCH_MAX_BODY_BYTES  the largest batch request body, in bytes (default 10485760, 10 MiB)
+//	OTEL_EXPORTER_OTLP_ENDPOINT  base URL of an OTLP/HTTP trace receiver, such as http://jaeger:4318; unset, spans
+//	                     are not exported, though traces still propagate (ADR 0034). OTEL_TRACES_SAMPLER and
+//	                     OTEL_TRACES_SAMPLER_ARG choose the sampling, every trace by default.
 package main
 
 import (
@@ -83,6 +86,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	level := cfg.LogLevel("LOG_LEVEL", slog.LevelInfo)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
 	maxBatchBody := cfg.Int("BATCH_MAX_BODY_BYTES", defaultMaxBatchBody)
+	tracesEndpoint := cfg.String("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 	if err := cfg.Err(); err != nil {
 		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
@@ -106,6 +110,11 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	store := notification.NewStore(pool)
 	hub := notification.NewHub(log)
 	notifications := notification.NewHandler(notification.NewService(store, log), hub, log, int64(maxBatchBody))
+	stopTracing, err := observability.SetupTracing(ctx, "notifications-api", tracesEndpoint)
+	if err != nil {
+		return err
+	}
+	defer flushTraces(ctx, stopTracing)
 	// Status updates (ADR 0033): the hub hears PostgreSQL's announcements until run returns, then closes every
 	// WebSocket subscription; run waits for it, before the pool closes.
 	hubCtx, stopHub := context.WithCancel(ctx)
@@ -132,4 +141,14 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	}
 	log.InfoContext(ctx, "stopped")
 	return nil
+}
+
+// tracesFlushTimeout bounds the export of the last spans when the process stops.
+const tracesFlushTimeout = 5 * time.Second
+
+// flushTraces exports the spans still buffered, within tracesFlushTimeout, after ctx has ended.
+func flushTraces(ctx context.Context, stop func(context.Context) error) {
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), tracesFlushTimeout)
+	defer cancel()
+	_ = stop(flushCtx)
 }

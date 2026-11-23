@@ -9,6 +9,8 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 )
 
@@ -73,6 +75,7 @@ func (s *Service) Create(ctx context.Context, d Draft, idempotencyKey string) (n
 		ScheduledAt:   d.ScheduledAt,
 		TemplateID:    d.TemplateID,
 		CorrelationID: correlationID,
+		TraceParent:   traceParentOf(ctx),
 	}, idem)
 	if err != nil {
 		return Notification{}, false, err
@@ -102,7 +105,7 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 			{Field: "notifications", Code: CodeTooLong, Message: fmt.Sprintf("must hold at most %d notifications", MaxBatchSize)}}}
 	}
 
-	correlationID := correlationIDOf(ctx)
+	correlationID, traceParent := correlationIDOf(ctx), traceParentOf(ctx)
 	nb := NewBatch{ID: uuid.NewV7(), Total: len(drafts), CorrelationID: correlationID}
 	now := time.Now()
 	// A batch reads each template it names once, however many items use it.
@@ -123,6 +126,7 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 		nb.Items = append(nb.Items, NewBatchItem{Index: i, Notification: Notification{
 			ID: uuid.NewV7(), To: d.To, Channel: d.Channel, Content: d.Content, Priority: d.Priority,
 			Status: d.Status(now), ScheduledAt: d.ScheduledAt, TemplateID: d.TemplateID, CorrelationID: correlationID,
+			TraceParent: traceParent,
 		}})
 	}
 	if len(nb.Items) == 0 {
@@ -145,6 +149,13 @@ func (s *Service) CreateBatch(ctx context.Context, drafts []Draft, idempotencyKe
 // GetBatch returns the batch with the given ID, with its accepted notifications counted by status, or ErrNotFound.
 func (s *Service) GetBatch(ctx context.Context, id uuid.UUID) (Batch, error) {
 	return s.store.GetBatch(ctx, id)
+}
+
+// traceParentOf returns the W3C traceparent of the span ctx carries, or "" outside a trace (ADR 0034).
+func traceParentOf(ctx context.Context) string {
+	carrier := propagation.MapCarrier{}
+	observability.Propagator().Inject(ctx, carrier)
+	return carrier.Get("traceparent")
 }
 
 // correlationIDOf returns ctx's correlation ID, or a new one for callers outside HTTP, whose context carries none;

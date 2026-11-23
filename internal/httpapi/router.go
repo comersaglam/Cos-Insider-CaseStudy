@@ -13,8 +13,9 @@ import (
 )
 
 // NewRouter returns the service's HTTP handler: every module's routes, the probes, Prometheus's /metrics, and the
-// contract with its documentation page, on one mux, requests no route matches answered as problems, all behind the middleware chain of ADR 0013 (correlation ID,
-// metrics, access log, panic recovery). Mounting a module is one line here. The HTTP metrics are registered on reg.
+// contract with its documentation page, on one mux, requests no route matches answered as problems, all behind the
+// middleware chain of ADR 0013 (correlation ID, tracing, metrics, access log, panic recovery). Mounting a module is
+// one line here. The HTTP metrics are registered on reg.
 func NewRouter(log *slog.Logger, reg *prometheus.Registry, probes *health.Handler, notifications *notification.Handler) http.Handler {
 	h, _ := newRouter(log, reg, probes, notifications)
 	return h
@@ -42,10 +43,12 @@ func newRouter(log *slog.Logger, reg *prometheus.Registry, probes *health.Handle
 	mux.Handle("GET /openapi.yaml", http.HandlerFunc(serveSpec))
 	mux.Handle("GET /docs", http.HandlerFunc(serveDocs))
 
+	// Probes and scrapes come every few seconds: logged at debug level while they succeed, and not traced.
+	quiet := []string{"/healthz", "/readyz", "/metrics"}
 	h := httpx.ProblemFallback(mux.ServeMux)
 	h = httpx.Recover(log)(h)
-	// Probes and scrapes come every few seconds; they are logged at debug level while they succeed.
-	h = httpx.AccessLog(log, "/healthz", "/readyz", "/metrics")(h)
+	h = httpx.AccessLog(log, quiet...)(h)
 	h = httpx.NewHTTPMetrics(reg).Middleware(h)
+	h = httpx.Trace(quiet...)(h)
 	return httpx.Correlation(h), mux.patterns
 }

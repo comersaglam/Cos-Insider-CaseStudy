@@ -6,7 +6,14 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
 )
 
@@ -87,19 +94,40 @@ func (r *Relay) drain(ctx context.Context) error {
 	}
 }
 
+// tracer names the dispatch module's spans.
+var tracer = otel.Tracer("github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch")
+
 // publish turns outbox entries into messages: routed by channel, with the priority's rank as AMQP priority, and
-// the notification's ID as message ID and body.
+// the notification's ID as message ID and body. Each message is published in a span that continues the trace the
+// notification was created in, and carries that span in its headers for the consumer to continue (ADR 0034).
 func (r *Relay) publish(ctx context.Context, entries []notification.OutboxEntry) error {
 	msgs := make([]rabbitmq.Message, len(entries))
+	spans := make([]trace.Span, len(entries))
 	for i, e := range entries {
 		body, err := notification.QueueMessage{NotificationID: e.NotificationID}.Marshal()
 		if err != nil {
 			return fmt.Errorf("encode message for %s: %w", e.NotificationID, err)
 		}
+		created := observability.Propagator().Extract(ctx, propagation.MapCarrier{"traceparent": e.TraceParent})
+		spanCtx, span := tracer.Start(created, "send "+r.cfg.Exchange, trace.WithSpanKind(trace.SpanKindProducer),
+			trace.WithAttributes(semconv.MessagingSystemRabbitMQ, semconv.MessagingOperationTypeSend,
+				semconv.MessagingDestinationName(r.cfg.Exchange), semconv.MessagingRabbitMQDestinationRoutingKey(string(e.Channel)),
+				semconv.MessagingMessageID(e.NotificationID.String())))
+		spans[i] = span
+		headers := propagation.MapCarrier{}
+		observability.Propagator().Inject(spanCtx, headers)
 		msgs[i] = rabbitmq.Message{
 			Exchange: r.cfg.Exchange, RoutingKey: string(e.Channel), ID: e.NotificationID.String(), Body: body,
-			Priority: e.Priority.Rank(), CorrelationID: e.CorrelationID,
+			Priority: e.Priority.Rank(), CorrelationID: e.CorrelationID, Headers: headers,
 		}
 	}
-	return r.pub.Publish(ctx, msgs...)
+	err := r.pub.Publish(ctx, msgs...)
+	for _, span := range spans {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "publish failed")
+		}
+		span.End()
+	}
+	return err
 }

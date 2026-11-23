@@ -80,6 +80,7 @@ func (s *Store) CreateBatch(ctx context.Context, b NewBatch, idem IdempotencyKey
 				ID: n.ID, Channel: string(n.Channel), Recipient: n.To, Content: n.Content, Priority: string(n.Priority),
 				Status: string(n.Status), CorrelationID: n.CorrelationID, BatchID: &row.ID, BatchIndex: &index,
 				ScheduledAt: n.ScheduledAt, NextAttemptAt: dueAt(n), TemplateID: n.TemplateID,
+				TraceParent: optional(n.TraceParent),
 			}
 			if n.Status == StatusQueued {
 				outbox = append(outbox, n.ID)

@@ -43,12 +43,7 @@ func (m *HTTPMetrics) Middleware(next http.Handler) http.Handler {
 		rec := &recorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 
-		route := "unmatched"
-		if _, path, ok := strings.Cut(r.Pattern, " "); ok {
-			route = path
-		} else if r.Pattern != "" {
-			route = r.Pattern
-		}
+		route := routeOf(r)
 		status := rec.status
 		if status == 0 {
 			status = http.StatusOK
@@ -67,4 +62,19 @@ func knownMethod(m string) string {
 		return m
 	}
 	return "OTHER"
+}
+
+// unmatched is the route of a request no pattern matched.
+const unmatched = "unmatched"
+
+// routeOf returns the path part of the pattern the router matched r with, such as /v1/notifications/{id}, once the
+// router has run, or unmatched: a bounded set of values, never a path with an ID in it.
+func routeOf(r *http.Request) string {
+	if _, path, ok := strings.Cut(r.Pattern, " "); ok {
+		return path
+	}
+	if r.Pattern != "" {
+		return r.Pattern
+	}
+	return unmatched
 }

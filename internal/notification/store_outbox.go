@@ -18,6 +18,7 @@ type OutboxEntry struct {
 	Channel        Channel
 	Priority       Priority
 	CorrelationID  string
+	TraceParent    string // the trace the notification was created in, or ""
 }
 
 // DrainOutbox takes up to limit outbox rows, oldest first, hands them to publish, and deletes them once publish
@@ -41,7 +42,7 @@ func (s *Store) DrainOutbox(ctx context.Context, limit int, publish func(context
 		for i, r := range rows {
 			entries[i] = OutboxEntry{
 				NotificationID: r.NotificationID, Channel: Channel(r.Channel), Priority: Priority(r.Priority),
-				CorrelationID: r.CorrelationID,
+				CorrelationID: r.CorrelationID, TraceParent: deref(r.TraceParent),
 			}
 			ids[i] = r.ID
 		}

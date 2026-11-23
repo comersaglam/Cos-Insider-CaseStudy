@@ -43,6 +43,7 @@ func (r iteratorForCopyBatchNotifications) Values() ([]interface{}, error) {
 		r.rows[0].ScheduledAt,
 		r.rows[0].NextAttemptAt,
 		r.rows[0].TemplateID,
+		r.rows[0].TraceParent,
 	}, nil
 }
 
@@ -51,7 +52,7 @@ func (r iteratorForCopyBatchNotifications) Err() error {
 }
 
 func (q *Queries) CopyBatchNotifications(ctx context.Context, arg []CopyBatchNotificationsParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"notifications"}, []string{"id", "channel", "recipient", "content", "priority", "status", "correlation_id", "batch_id", "batch_index", "scheduled_at", "next_attempt_at", "template_id"}, &iteratorForCopyBatchNotifications{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"notifications"}, []string{"id", "channel", "recipient", "content", "priority", "status", "correlation_id", "batch_id", "batch_index", "scheduled_at", "next_attempt_at", "template_id", "trace_parent"}, &iteratorForCopyBatchNotifications{rows: arg})
 }
 
 // iteratorForCopyOutbox implements pgx.CopyFromSource.

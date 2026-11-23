@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -61,12 +62,15 @@ func newBroker(t *testing.T) (*amqp.Connection, rabbitmq.Topology) {
 	return conn, top
 }
 
+// testTraceParent is the trace the test notifications were created in.
+const testTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+
 // create stores a queued notification, as the API does.
 func create(t *testing.T, store *notification.Store, channel notification.Channel, to string, p notification.Priority) notification.Notification {
 	t.Helper()
 	n, _, err := store.Create(t.Context(), notification.Notification{
 		ID: uuid.NewV7(), To: to, Channel: channel, Content: "hello", Priority: p,
-		Status: notification.StatusQueued, CorrelationID: "corr-" + to,
+		Status: notification.StatusQueued, CorrelationID: "corr-" + to, TraceParent: testTraceParent,
 	}, notification.IdempotencyKey{})
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +173,8 @@ func TestRelayPublishesTheOutbox(t *testing.T) {
 		d := <-deliveries
 		m, err := notification.ParseQueueMessage(d.Body)
 		if err != nil || m.NotificationID != want.ID || d.MessageId != want.ID.String() ||
-			d.Priority != want.Priority.Rank() || d.Headers[rabbitmq.CorrelationHeader] != want.CorrelationID {
+			d.Priority != want.Priority.Rank() || d.Headers[rabbitmq.CorrelationHeader] != want.CorrelationID ||
+			!strings.HasPrefix(fmt.Sprint(d.Headers["traceparent"]), "00-4bf92f3577b34da6a3ce929d0e0e4736-") {
 			t.Errorf("delivery = %s id %s priority %d headers %v; want %s at %d", d.Body, d.MessageId, d.Priority, d.Headers, want.ID, want.Priority.Rank())
 		}
 	}

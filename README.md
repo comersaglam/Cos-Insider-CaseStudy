@@ -4,7 +4,8 @@
 
 A Go service that accepts notifications through an HTTP API and delivers them over SMS, e-mail and push through an
 external provider: queue workers, a per-channel rate limit, priorities, scheduling, templates, retries with backoff,
-a circuit breaker, idempotency, status updates over WebSocket, metrics, structured logs and health probes. Written for the Insider One software engineer assessment;
+a circuit breaker, idempotency, status updates over WebSocket, metrics, distributed tracing, structured logs and
+health probes. Written for the Insider One software engineer assessment;
 the brief is restated in [docs/requirements.md](docs/requirements.md).
 
 ## Quick start
@@ -26,6 +27,7 @@ Then open the API's documentation at <http://localhost:8080/docs>. `make down` s
 | <http://localhost:8080/docs> | the API's contract, rendered by Swagger UI |
 | <http://localhost:8080/v1/metrics> | the service's state as a person reads it |
 | <http://localhost:8080/metrics>, <http://localhost:9090/metrics> | Prometheus metrics of the API and the worker |
+| <http://localhost:16686> | Jaeger: the trace of each request, from the API through RabbitMQ to the provider |
 | <http://localhost:15672> | RabbitMQ's management UI (`notifications` / `notifications`) |
 | <http://localhost:8081/__admin/requests> | what the stand-in provider received |
 
@@ -181,6 +183,7 @@ modular monolith: packages by feature under `internal/`, infrastructure under `i
 | Scheduled notifications (bonus) | `scheduledAt`, up to 30 days ahead; waits in PostgreSQL and is queued when due |
 | Templates (bonus) | `/v1/templates` with `{{.name}}` placeholders, rendered when a notification is created |
 | Real-time status updates (bonus) | `/v1/status-updates` over WebSocket, fed by a PostgreSQL trigger through `LISTEN/NOTIFY` |
+| Distributed tracing (bonus) | OpenTelemetry: one trace from the request through the outbox and RabbitMQ to the provider, retries included; Jaeger in Compose |
 | Idempotency | `Idempotency-Key` on create and batch; the notification's ID sent to the provider; claims under a lease |
 | Retries | exponential backoff with full jitter, `Retry-After` honoured, a circuit breaker per channel, single and bulk retry by hand |
 | Real-time metrics | `/v1/metrics` (queue depth, success rate, latency percentiles) and Prometheus `/metrics` on both processes |
@@ -192,13 +195,17 @@ The full list, with the block and the decision behind each, is [docs/requirement
 
 ## Observability
 
-- **Logs**: JSON through `log/slog`, in UTC, each line with its `correlation_id`. Recipients are masked and message
+- **Logs**: JSON through `log/slog`, in UTC, each line with its `correlation_id`, and its `trace_id` inside a trace. Recipients are masked and message
   content is never logged; secrets are printed as `***`.
 - **Metrics**: the API counts requests by route and status and times them; the worker counts attempts by channel and
   outcome, times the provider, and reports breaker states, sends in flight and queue depths in PostgreSQL and
   RabbitMQ, the dead-letter queue included ([ADR 0026](docs/adr/0026-metrics.md)).
 - **Probes**: `/healthz` says the process runs; `/readyz` says its dependencies answer
   ([ADR 0027](docs/adr/0027-health-probes.md)).
+- **Traces**: OpenTelemetry spans for the API's requests, the relay's publishes, the consumer's processing and the
+  provider's calls, joined in one trace per notification through the W3C `traceparent`, which the notification keeps
+  and the messages carry; exported to Jaeger when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
+  ([ADR 0034](docs/adr/0034-distributed-tracing.md)).
 
 ## Configuration
 
@@ -217,6 +224,7 @@ Both processes read environment variables; Compose sets them, and `.env` overrid
 | `BREAKER_FAILURES`, `BREAKER_OPEN` | worker | `5`, `30s` | failures in a row that open a channel's breaker, and how long it stays open |
 | `HTTP_ADDR`, `OPS_ADDR` | api, worker | `:8080`, `:9090` | where each process listens |
 | `LOG_LEVEL` | both | `info` | `debug`, `info`, `warn` or `error` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | both | unset | where spans are exported over OTLP/HTTP; unset, none are |
 
 Every setting is listed in the package comments of [cmd/api](cmd/api/main.go) and [cmd/worker](cmd/worker/main.go).
 
@@ -248,4 +256,3 @@ verification and commits, and [docs/roadmap.md](docs/roadmap.md) holds the plan.
 - **Authentication**: the brief does not ask for it; it would sit in a gateway in front, or in one middleware.
 - **Exactly-once delivery**: not possible with a provider that is called over HTTP; delivery is at least once, and
   the provider receives an idempotency key to drop repeats.
-- **Distributed tracing**, the brief's last optional bonus, is planned in the [roadmap](docs/roadmap.md).

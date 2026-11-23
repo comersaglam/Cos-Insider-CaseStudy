@@ -18,6 +18,8 @@ type Notification struct {
 	BatchID       *uuid.UUID // the batch it came in, or nil
 	ScheduledAt   *time.Time // the time it was scheduled for, or nil
 	TemplateID    *uuid.UUID // the template it was rendered from, or nil
+	// TraceParent is the W3C traceparent of the request that created it, or "" (ADR 0034).
+	TraceParent   string
 	FailedAt      *time.Time // when it failed, while it is failed
 	Attempts      int        // attempts spent since it was created or last retried by hand
 	FailureReason FailureReason

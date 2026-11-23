@@ -10,13 +10,23 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/sony/gobreaker/v2"
 	"golang.org/x/time/rate"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
 )
+
+// tracer names the delivery module's spans.
+var tracer = otel.Tracer("github.com/comersaglam/Cos-Insider-CaseStudy/internal/delivery")
 
 // ErrDeliveriesClosed reports that RabbitMQ stopped delivering: the channel or the connection was lost. The
 // consumer stops and the process is restarted (ADR 0009).
@@ -228,6 +238,12 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
 	if id, _ := d.Headers[observability.CorrelationHeader].(string); observability.ValidCorrelationID(id) {
 		ctx = observability.WithCorrelationID(ctx, id)
 	}
+	// The message is processed in a span that continues the trace the relay put in its headers (ADR 0034).
+	ctx = observability.Propagator().Extract(ctx, rabbitmq.HeaderCarrier(d.Headers))
+	ctx, span := tracer.Start(ctx, "process "+c.channel, trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(semconv.MessagingSystemRabbitMQ, semconv.MessagingOperationTypeProcess,
+			semconv.MessagingMessageID(d.MessageId)))
+	defer span.End()
 	msg, err := notification.ParseQueueMessage(d.Body)
 	if err != nil {
 		return c.unprocessable(ctx, d, err)
@@ -315,6 +331,11 @@ func (c *Consumer) logAttempt(ctx context.Context, n notification.Notification, 
 		level = slog.LevelWarn
 	case PermanentAlert:
 		level = slog.LevelError
+	}
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.String("notification.outcome", string(a.Outcome)), attribute.Int("notification.attempt", a.Number))
+	if out.Class != Success {
+		span.SetStatus(codes.Error, string(a.Outcome))
 	}
 	c.log.Log(ctx, level, "attempt finished",
 		"notification_id", n.ID, "attempt", a.Number, "outcome", a.Outcome, "status_code", a.StatusCode,

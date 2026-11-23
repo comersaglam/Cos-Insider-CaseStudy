@@ -46,6 +46,8 @@ info:
     - **Correlation**: every request may carry `X-Correlation-ID` (1 to 128 visible ASCII characters); every answer
       carries the ID the request was handled under, the client's or a new one. A notification keeps the ID of the
       request that created it: the worker logs its sends under it and sends it to the provider.
+    - **Tracing**: a request may carry a W3C `traceparent`; the API continues that trace, and so do the worker's
+      publish, processing and provider call for the notifications it creates, retries included (ADR 0034).
     - **Errors**: every 4xx and 5xx answer is `application/problem+json` (RFC 9457) with a stable `code`, the
       request's `correlationId`, and, for invalid requests, `errors` locating each problem. Clients switch on
       `code`, never on `detail`.

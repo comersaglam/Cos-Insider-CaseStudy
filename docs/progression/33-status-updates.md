@@ -1,7 +1,7 @@
 # 33. Status updates over WebSocket
 
 - Date: 2026-11-24
-- Commits: this block's commit
+- Commits: `5389db4`
 - Decisions: [ADR 0033](../adr/0033-status-updates-over-websocket.md)
 
 ## Goal

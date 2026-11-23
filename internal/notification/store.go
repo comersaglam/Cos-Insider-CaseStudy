@@ -41,6 +41,7 @@ func (s *Store) Create(ctx context.Context, n Notification, idem IdempotencyKey)
 		ScheduledAt:   n.ScheduledAt,
 		NextAttemptAt: dueAt(n),
 		TemplateID:    n.TemplateID,
+		TraceParent:   optional(n.TraceParent),
 	}
 	if idem.Key != "" {
 		params.IdempotencyKey = &idem.Key
@@ -103,6 +104,7 @@ func fromRow(r db.Notification) Notification {
 		BatchID:           r.BatchID,
 		ScheduledAt:       utc(r.ScheduledAt),
 		TemplateID:        r.TemplateID,
+		TraceParent:       deref(r.TraceParent),
 		FailedAt:          utc(r.FailedAt),
 		Attempts:          r.Attempts,
 		FailureReason:     FailureReason(deref(r.FailureReason)),
@@ -110,6 +112,14 @@ func fromRow(r db.Notification) Notification {
 		CreatedAt:         r.CreatedAt.UTC(),
 		UpdatedAt:         r.UpdatedAt.UTC(),
 	}
+}
+
+// optional returns s, or nil when it is empty, for a nullable column.
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // dueAt is when the scheduler should queue n: its scheduled time while it is scheduled, otherwise never (nil).

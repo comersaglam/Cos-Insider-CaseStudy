@@ -15,6 +15,8 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
@@ -49,6 +51,7 @@ type provider struct {
 	calls        map[string]int
 	keys         map[string]string
 	correlations map[string]string
+	traces       map[string]string
 	answer       func(to string) int
 	block        chan struct{} // when set, each request waits for it to close
 	called       chan string
@@ -66,6 +69,10 @@ func (p *provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.correlations = map[string]string{}
 	}
 	p.correlations[req.To] = r.Header.Get(observability.CorrelationHeader)
+	if p.traces == nil {
+		p.traces = map[string]string{}
+	}
+	p.traces[req.To] = r.Header.Get("traceparent")
 	p.mu.Unlock()
 	if p.called != nil {
 		p.called <- req.To
@@ -310,7 +317,11 @@ func TestCorrelationIDCrossesTheQueue(t *testing.T) {
 	var logs logLines
 	svc, store, _, _ := startWorker(t, p, &logs)
 
-	ctx := observability.WithCorrelationID(t.Context(), "trace-me")
+	// Created in a trace, as the API's request span would carry it (ADR 0034).
+	tid, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	sid, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	ctx := trace.ContextWithSpanContext(observability.WithCorrelationID(t.Context(), "trace-me"),
+		trace.NewSpanContext(trace.SpanContextConfig{TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled}))
 	n, _, err := svc.Create(ctx, notification.Draft{
 		To: "+905551234567", Channel: notification.ChannelSMS, Content: "one", Priority: notification.PriorityNormal,
 	}, "")
@@ -320,10 +331,13 @@ func TestCorrelationIDCrossesTheQueue(t *testing.T) {
 	waitForStatus(t, store, n.ID, notification.StatusSent)
 
 	p.mu.Lock()
-	sentWith := p.correlations["+905551234567"]
+	sentWith, traceparent := p.correlations["+905551234567"], p.traces["+905551234567"]
 	p.mu.Unlock()
 	if sentWith != "trace-me" {
 		t.Errorf("the provider received correlation ID %q, want trace-me", sentWith)
+	}
+	if !strings.HasPrefix(traceparent, "00-4bf92f3577b34da6a3ce929d0e0e4736-") {
+		t.Errorf("the provider received traceparent %q, want the trace the notification was created in", traceparent)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for !logs.has(`"msg":"attempt finished"`, `"correlation_id":"trace-me"`, n.ID.String()) {

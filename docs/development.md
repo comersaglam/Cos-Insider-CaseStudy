@@ -63,6 +63,7 @@ Tests do not need it.
 | Metrics: API, worker, summary | <http://localhost:8080/metrics>, <http://localhost:9090/metrics>, <http://localhost:8080/v1/metrics> | none |
 | Probes: API, worker (`/healthz` the same) | <http://localhost:8080/readyz>, <http://localhost:9090/readyz> | none |
 | The contract, rendered by Swagger UI, and as YAML | <http://localhost:8080/docs>, <http://localhost:8080/openapi.yaml> | none |
+| Traces (Jaeger) | <http://localhost:16686> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.

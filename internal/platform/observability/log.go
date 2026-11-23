@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // NewLogger returns a logger that writes one JSON object per line to w, drops records below level, writes times
-// in UTC, and adds the correlation ID of the context passed to the *Context methods (InfoContext, ErrorContext,
-// ...).
+// in UTC, and adds the correlation ID and the trace of the context passed to the *Context methods (InfoContext,
+// ErrorContext, ...).
 func NewLogger(w io.Writer, level slog.Leveler) *slog.Logger {
 	return slog.New(contextHandler{slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level, ReplaceAttr: utcTime})})
 }
@@ -30,6 +32,10 @@ type contextHandler struct {
 func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if id := CorrelationID(ctx); id != "" {
 		r.AddAttrs(slog.String("correlation_id", id))
+	}
+	// The trace's IDs join a line to its span in the trace backend (ADR 0034).
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		r.AddAttrs(slog.String("trace_id", sc.TraceID().String()), slog.String("span_id", sc.SpanID().String()))
 	}
 	return h.Handler.Handle(ctx, r)
 }

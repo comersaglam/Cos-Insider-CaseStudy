@@ -60,7 +60,7 @@ func (q *Queries) AttemptLatencySince(ctx context.Context, windowMs int) ([]Atte
 const cancelNotification = `-- name: CancelNotification :one
 UPDATE notifications SET status = 'cancelled', next_attempt_at = NULL, updated_at = now()
 WHERE id = $1 AND status = ANY ($2::text[])
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent
 `
 
 type CancelNotificationParams struct {
@@ -94,6 +94,7 @@ func (q *Queries) CancelNotification(ctx context.Context, arg CancelNotification
 		&i.ProviderMessageID,
 		&i.ScheduledAt,
 		&i.TemplateID,
+		&i.TraceParent,
 	)
 	return i, err
 }
@@ -109,7 +110,7 @@ FROM current
 WHERE n.id = current.id
   AND n.attempts < $2::integer
   AND (n.status = 'queued' OR (n.status = 'sending' AND n.claimed_until < now()))
-RETURNING n.id, n.channel, n.recipient, n.content, n.priority, n.status, n.idempotency_key, n.request_hash, n.correlation_id, n.created_at, n.updated_at, n.batch_id, n.batch_index, n.failed_at, n.next_attempt_at, n.attempts, n.claimed_until, n.failure_reason, n.provider_message_id, n.scheduled_at, n.template_id, current.status AS previous_status
+RETURNING n.id, n.channel, n.recipient, n.content, n.priority, n.status, n.idempotency_key, n.request_hash, n.correlation_id, n.created_at, n.updated_at, n.batch_id, n.batch_index, n.failed_at, n.next_attempt_at, n.attempts, n.claimed_until, n.failure_reason, n.provider_message_id, n.scheduled_at, n.template_id, n.trace_parent, current.status AS previous_status
 `
 
 type ClaimNotificationParams struct {
@@ -150,13 +151,14 @@ func (q *Queries) ClaimNotification(ctx context.Context, arg ClaimNotificationPa
 		&i.Notification.ProviderMessageID,
 		&i.Notification.ScheduledAt,
 		&i.Notification.TemplateID,
+		&i.Notification.TraceParent,
 		&i.PreviousStatus,
 	)
 	return i, err
 }
 
 const claimOutbox = `-- name: ClaimOutbox :many
-SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id
+SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id, n.trace_parent
 FROM outbox o
 JOIN notifications n ON n.id = o.notification_id
 ORDER BY o.id
@@ -170,6 +172,7 @@ type ClaimOutboxRow struct {
 	Channel        string
 	Priority       string
 	CorrelationID  string
+	TraceParent    *string
 }
 
 // Takes up to batch_size outbox rows, oldest first, with what publishing them needs, and locks them until the
@@ -189,6 +192,7 @@ func (q *Queries) ClaimOutbox(ctx context.Context, batchSize int) ([]ClaimOutbox
 			&i.Channel,
 			&i.Priority,
 			&i.CorrelationID,
+			&i.TraceParent,
 		); err != nil {
 			return nil, err
 		}
@@ -213,6 +217,7 @@ type CopyBatchNotificationsParams struct {
 	ScheduledAt   *time.Time
 	NextAttemptAt *time.Time
 	TemplateID    *uuid.UUID
+	TraceParent   *string
 }
 
 const countAttemptsSince = `-- name: CountAttemptsSince :many
@@ -450,7 +455,7 @@ func (q *Queries) GetBatchByIdempotencyKey(ctx context.Context, idempotencyKey *
 }
 
 const getNotification = `-- name: GetNotification :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id FROM notifications WHERE id = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent FROM notifications WHERE id = $1
 `
 
 func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notification, error) {
@@ -478,12 +483,13 @@ func (q *Queries) GetNotification(ctx context.Context, id uuid.UUID) (Notificati
 		&i.ProviderMessageID,
 		&i.ScheduledAt,
 		&i.TemplateID,
+		&i.TraceParent,
 	)
 	return i, err
 }
 
 const getNotificationByIdempotencyKey = `-- name: GetNotificationByIdempotencyKey :one
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id FROM notifications WHERE idempotency_key = $1
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent FROM notifications WHERE idempotency_key = $1
 `
 
 func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempotencyKey *string) (Notification, error) {
@@ -511,6 +517,7 @@ func (q *Queries) GetNotificationByIdempotencyKey(ctx context.Context, idempoten
 		&i.ProviderMessageID,
 		&i.ScheduledAt,
 		&i.TemplateID,
+		&i.TraceParent,
 	)
 	return i, err
 }
@@ -604,14 +611,14 @@ func (q *Queries) InsertDeliveryAttempt(ctx context.Context, arg InsertDeliveryA
 const insertNotification = `-- name: InsertNotification :one
 INSERT INTO notifications (
     id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id,
-    scheduled_at, next_attempt_at, template_id
+    scheduled_at, next_attempt_at, template_id, trace_parent
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12
+    $10, $11, $12, $13
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent
 `
 
 type InsertNotificationParams struct {
@@ -627,6 +634,7 @@ type InsertNotificationParams struct {
 	ScheduledAt    *time.Time
 	NextAttemptAt  *time.Time
 	TemplateID     *uuid.UUID
+	TraceParent    *string
 }
 
 // Inserts a notification unless its idempotency key is taken, in which case it returns no row.
@@ -644,6 +652,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		arg.ScheduledAt,
 		arg.NextAttemptAt,
 		arg.TemplateID,
+		arg.TraceParent,
 	)
 	var i Notification
 	err := row.Scan(
@@ -668,6 +677,7 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 		&i.ProviderMessageID,
 		&i.ScheduledAt,
 		&i.TemplateID,
+		&i.TraceParent,
 	)
 	return i, err
 }
@@ -775,7 +785,7 @@ func (q *Queries) ListDeliveryAttempts(ctx context.Context, notificationID uuid.
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id FROM notifications
+SELECT id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent FROM notifications
 WHERE ($1::text[] IS NULL OR status = ANY ($1::text[]))
   AND ($2::text[] IS NULL OR channel = ANY ($2::text[]))
   AND ($3::uuid IS NULL OR batch_id = $3::uuid)
@@ -840,6 +850,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.ProviderMessageID,
 			&i.ScheduledAt,
 			&i.TemplateID,
+			&i.TraceParent,
 		); err != nil {
 			return nil, err
 		}
@@ -989,7 +1000,7 @@ const requeueFailedNotification = `-- name: RequeueFailedNotification :one
 UPDATE notifications
 SET status = 'queued', failed_at = NULL, failure_reason = NULL, attempts = 0, updated_at = now()
 WHERE id = $1 AND status = 'failed'
-RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id
+RETURNING id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id, created_at, updated_at, batch_id, batch_index, failed_at, next_attempt_at, attempts, claimed_until, failure_reason, provider_message_id, scheduled_at, template_id, trace_parent
 `
 
 // Puts a failed notification back in the queue; returns no row when it is not failed.
@@ -1018,6 +1029,7 @@ func (q *Queries) RequeueFailedNotification(ctx context.Context, id uuid.UUID) (
 		&i.ProviderMessageID,
 		&i.ScheduledAt,
 		&i.TemplateID,
+		&i.TraceParent,
 	)
 	return i, err
 }

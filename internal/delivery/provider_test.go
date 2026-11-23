@@ -12,6 +12,8 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 )
 
@@ -173,5 +175,21 @@ func TestSendStopsWithItsContext(t *testing.T) {
 	cancel()
 	if out := c.Send(ctx, testNotification); out.Class != Transient || !errors.Is(out.Err, context.Canceled) {
 		t.Errorf("outcome = %+v, want transient with context.Canceled", out)
+	}
+}
+
+// TestSendCarriesTheTrace: the provider receives the trace of the send, so a provider that traces joins it.
+func TestSendCarriesTheTrace(t *testing.T) {
+	var got string
+	c := provider(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("traceparent")
+		w.WriteHeader(http.StatusAccepted)
+	})
+	tid, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	sid, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	ctx := trace.ContextWithSpanContext(t.Context(), trace.NewSpanContext(trace.SpanContextConfig{TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled}))
+	c.Send(ctx, testNotification)
+	if !strings.HasPrefix(got, "00-4bf92f3577b34da6a3ce929d0e0e4736-") {
+		t.Errorf("traceparent = %q, want the send's trace", got)
 	}
 }

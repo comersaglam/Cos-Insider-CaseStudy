@@ -8,6 +8,8 @@ import (
 	"time"
 	"uuid"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 )
 
@@ -205,5 +207,26 @@ func TestServiceGet(t *testing.T) {
 	}
 	if _, err := newTestService(&fakeStore{notFoundGet: true}).Get(t.Context(), id); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get = %v, want ErrNotFound", err)
+	}
+}
+
+// TestServiceCreateKeepsTheTraceOfTheRequest: a notification keeps the trace it was created in, which the relay
+// continues when it publishes it (ADR 0034).
+func TestServiceCreateKeepsTheTraceOfTheRequest(t *testing.T) {
+	tid, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	sid, _ := trace.SpanIDFromHex("00f067aa0ba902b7")
+	ctx := trace.ContextWithSpanContext(t.Context(), trace.NewSpanContext(trace.SpanContextConfig{TraceID: tid, SpanID: sid, TraceFlags: trace.FlagsSampled}))
+	store := &fakeStore{}
+	if _, _, err := newTestService(store).Create(ctx, testDraft, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := newTestService(store).Create(t.Context(), testDraft, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.created[0].TraceParent; got != "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" {
+		t.Errorf("TraceParent = %q", got)
+	}
+	if got := store.created[1].TraceParent; got != "" {
+		t.Errorf("TraceParent outside a trace = %q, want none", got)
 	}
 }

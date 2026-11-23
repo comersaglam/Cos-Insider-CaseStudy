@@ -2,11 +2,11 @@
 -- Inserts a notification unless its idempotency key is taken, in which case it returns no row.
 INSERT INTO notifications (
     id, channel, recipient, content, priority, status, idempotency_key, request_hash, correlation_id,
-    scheduled_at, next_attempt_at, template_id
+    scheduled_at, next_attempt_at, template_id, trace_parent
 ) VALUES (
     @id, @channel, @recipient, @content, @priority, @status,
     sqlc.narg(idempotency_key), sqlc.narg(request_hash), @correlation_id,
-    sqlc.narg(scheduled_at), sqlc.narg(next_attempt_at), sqlc.narg(template_id)
+    sqlc.narg(scheduled_at), sqlc.narg(next_attempt_at), sqlc.narg(template_id), sqlc.narg(trace_parent)
 )
 ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 RETURNING *;
@@ -30,10 +30,10 @@ RETURNING *;
 -- name: CopyBatchNotifications :copyfrom
 INSERT INTO notifications (
     id, channel, recipient, content, priority, status, correlation_id, batch_id, batch_index,
-    scheduled_at, next_attempt_at, template_id
+    scheduled_at, next_attempt_at, template_id, trace_parent
 ) VALUES (
     @id, @channel, @recipient, @content, @priority, @status, @correlation_id, @batch_id, @batch_index,
-    @scheduled_at, @next_attempt_at, @template_id
+    @scheduled_at, @next_attempt_at, @template_id, @trace_parent
 );
 
 -- name: CopyOutbox :copyfrom
@@ -108,7 +108,7 @@ INSERT INTO outbox (notification_id) SELECT id FROM requeued;
 -- name: ClaimOutbox :many
 -- Takes up to batch_size outbox rows, oldest first, with what publishing them needs, and locks them until the
 -- transaction ends; SKIP LOCKED leaves rows another relay holds.
-SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id
+SELECT o.id, o.notification_id, n.channel, n.priority, n.correlation_id, n.trace_parent
 FROM outbox o
 JOIN notifications n ON n.id = o.notification_id
 ORDER BY o.id

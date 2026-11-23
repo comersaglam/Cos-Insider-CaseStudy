@@ -117,6 +117,7 @@ type notificationResponse struct {
 	BatchID           *uuid.UUID    `json:"batchId,omitzero"`
 	ScheduledAt       *time.Time    `json:"scheduledAt,omitzero"`
 	TemplateID        *uuid.UUID    `json:"templateId,omitzero"`
+	TraceParent       string        `json:"-"` // internal: the trace lives in the logs and the trace backend
 	FailedAt          *time.Time    `json:"failedAt,omitzero"`
 	Attempts          int           `json:"attempts"`
 	FailureReason     FailureReason `json:"failureReason,omitzero"`

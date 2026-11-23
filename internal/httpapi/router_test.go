@@ -173,3 +173,18 @@ func TestEveryRouteIsInTheContract(t *testing.T) {
 		}
 	}
 }
+
+// TestRouterContinuesTheCallersTrace: a request carrying a traceparent is handled in the caller's trace, even with
+// no span exported, so the access log line can be found from the caller's trace.
+func TestRouterContinuesTheCallersTrace(t *testing.T) {
+	var logs bytes.Buffer
+	log := observability.NewLogger(&logs, slog.LevelInfo)
+	h := NewRouter(log, observability.NewRegistry(), noProbes(log), notification.NewHandler(noNotifications{}, notification.NewHub(log), log, 1<<20))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/notifications/"+uuid.NewV7().String(), nil)
+	r.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+
+	if !strings.Contains(logs.String(), `"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"`) {
+		t.Errorf("the access log is not in the caller's trace:\n%s", logs.String())
+	}
+}
