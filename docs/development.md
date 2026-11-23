@@ -53,7 +53,7 @@ Targets added with the parts they serve: `generate` (`sqlc`), `migrate`.
 | `cmd/api`, `cmd/worker` | composition roots: configuration, platform clients and modules are built and connected here |
 | `internal/httpapi` | the central router: the middleware chain and the one place modules are mounted |
 | `internal/<module>` | one feature: its types, use cases, handlers, storage and tests (`notification`, `delivery`, `dispatch`, `health`) |
-| `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`, and `testenv` for integration tests) |
+| `internal/platform/<name>` | infrastructure without business meaning (`config`, `postgres`, `rabbitmq`, `httpx`, `observability`, and `testenv` for integration tests); its conventions are [ADR 0013](adr/0013-platform-conventions.md) |
 | `migrations` | versioned SQL migrations |
 | `api/openapi.yaml` | the API contract |
 | `compose.yaml`, `Dockerfile` | the local stack and the application's image, at the root where Docker looks for them; `deploy/` only for configuration files mounted into containers |

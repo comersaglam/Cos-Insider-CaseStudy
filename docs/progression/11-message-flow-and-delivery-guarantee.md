@@ -1,7 +1,7 @@
 # 11. Message flow and delivery guarantee
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `cea7518`
 - Decisions: [ADR 0012](../adr/0012-message-flow-and-delivery-guarantee.md), amending
   [ADR 0003](../adr/0003-postgresql-and-rabbitmq-with-outbox.md)
 

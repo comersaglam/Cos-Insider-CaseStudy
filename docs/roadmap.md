@@ -35,6 +35,8 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: middleware through `httptest`; a panic becomes a 500 problem response; the correlation ID appears in the
   response and the log; recipients are masked in logs.
 - **Watch**: one `slog.Handler` wrapper adds context fields; masking lives in one place.
+- **Decided** ([ADR 0013](adr/0013-platform-conventions.md)): configuration with the standard library, every
+  problem reported at once; `X-Correlation-ID`; problem `errors` located by JSON Pointer; `encoding/json/v2`.
 
 ### 13. Database and store
 - **Scope**: migrations (`notifications` with `attempts` and `claimed_until`, `batches`, `outbox`,
@@ -58,7 +60,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - **Tests**: 1000 accepted, 1001 refused; behaviour with invalid items; all rows in one transaction.
 - **Watch**: `COPY` through pgx `CopyFrom` for notifications and outbox rows.
 - **Open question**: one invalid item refuses the whole batch (atomic), or valid items are accepted and invalid
-  ones reported (partial).
+  ones reported (partial); the body size limit, since 1000 e-mails of 100,000 characters could reach 400 MB.
 
 ### 16. List, cancel and retry
 - **Scope**: `GET /v1/notifications` with status, channel, date range and batch filters and keyset cursors;
@@ -180,4 +182,8 @@ Recorded so the first version stays small; each would get its own ADR.
   raising per-channel throughput beyond one consumer needs sharded queues or a distributed limiter, superseding
   [ADR 0005](adr/0005-rate-limit-with-single-active-consumer.md).
 - **Per-channel retry policies** and **message expiry** (`expiresAt`), from [ADR 0007](adr/0007-delivery-and-retry.md).
+- **Admission control**: answering `429` or `503` when the backlog passes a threshold. In the first version the
+  queue and PostgreSQL absorb bursts, which is what the asynchronous design is for; backpressure inside the
+  system comes from the prefetch count, the semaphore, the rate limiter, the breaker and RabbitMQ's publisher
+  blocking ([ADR 0012](adr/0012-message-flow-and-delivery-guarantee.md)).
 - **Quorum queues** for a multi-node RabbitMQ cluster, from [ADR 0003](adr/0003-postgresql-and-rabbitmq-with-outbox.md).

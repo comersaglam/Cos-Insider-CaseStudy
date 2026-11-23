@@ -20,6 +20,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0010](0010-local-environment-with-docker-compose.md) | Local environment with Docker Compose | Accepted |
 | [0011](0011-notification-domain.md) | Notification domain: the provider contract, statuses and validation | Accepted |
 | [0012](0012-message-flow-and-delivery-guarantee.md) | Message flow and delivery guarantee | Accepted |
+| [0013](0013-platform-conventions.md) | Platform conventions: configuration, logging, correlation, errors and JSON | Accepted |
 
 ## Template
 

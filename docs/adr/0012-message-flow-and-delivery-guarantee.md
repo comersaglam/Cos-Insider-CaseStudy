@@ -25,6 +25,13 @@ which exactly one worker must carry out, so the pattern is a work queue. Publish
 ("this was sent") that several parties react to; none is needed here (status updates to WebSocket clients use
 PostgreSQL `LISTEN/NOTIFY`).
 
+A work queue is not sequential. Take a batch of 1000 SMS and three worker replicas: the batch becomes 1000
+messages, one per recipient; the active consumer holds 32 of them at once and sends them concurrently, paced by
+the rate limit, about ten seconds in all, and each recipient gets one SMS. Published to a fanout exchange
+instead, every replica would receive all 1000, and each recipient would get three; dividing the work would mean
+each replica choosing its own share, which is a work queue rebuilt by hand. One message per recipient, rather
+than one per batch, also gives each recipient its own status, retries, cancellation and idempotency.
+
 | Exchange | For | Against |
 |---|---|---|
 | **Direct exchange, routing key = channel** | The publisher knows only the channel; another queue (an audit or debugging tap) binds without touching it | One more object to declare |
