@@ -4,6 +4,7 @@
 - Date: 2026-11-23
 - Amends: [0010](0010-local-environment-with-docker-compose.md) (Compose now runs the service, not only its
   dependencies)
+- Amended by: [0025](0025-worker-in-compose-and-the-provider-stand-in.md) (the worker and a stand-in provider)
 
 ## Context
 

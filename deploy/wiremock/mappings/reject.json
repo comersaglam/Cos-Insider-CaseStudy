@@ -1,0 +1,10 @@
+{
+  "name": "Rejects +905550000422 for good, to show a permanent failure",
+  "priority": 1,
+  "request": {
+    "method": "POST",
+    "urlPath": "/notify",
+    "bodyPatterns": [{ "matchesJsonPath": "$[?(@.to == '+905550000422')]" }]
+  },
+  "response": { "status": 422, "headers": { "Content-Type": "application/json" }, "jsonBody": { "error": "invalid recipient" } }
+}

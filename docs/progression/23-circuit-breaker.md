@@ -1,7 +1,7 @@
 # 23. Circuit breaker and pausing the pull
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `65d6795`
 - Decisions: [ADR 0024](../adr/0024-circuit-breaker.md), applying [ADR 0007](../adr/0007-delivery-and-retry.md)
 
 ## Goal

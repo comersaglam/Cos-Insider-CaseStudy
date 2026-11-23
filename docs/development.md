@@ -50,11 +50,15 @@ Tests do not need it.
 | RabbitMQ (AMQP) | `amqp://localhost:5672` | `notifications` / `notifications` |
 | RabbitMQ management UI | <http://localhost:15672> | `notifications` / `notifications` |
 | API (after `make up`) | <http://localhost:8080> | none |
+| Stand-in provider (WireMock), its received requests | <http://localhost:8081/__admin/requests> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.
 - `docker compose down --volumes` deletes the data and starts the next `make up` from empty.
 - Image tags are the ones in `internal/platform/testenv`; change both together, or `make test` fails.
+- The worker sends to the stand-in provider unless `PROVIDER_URL` in `.env` names another, such as a webhook.site
+  URL answering `202` ([ADR 0025](adr/0025-worker-in-compose-and-the-provider-stand-in.md)). The stand-in answers
+  `+905550000503` with `503` (retries, the circuit breaker) and `+905550000422` with `422` (a permanent failure).
 - To try the API: `make up` and `make smoke`. To work on it from source: `make deps`, `make migrate`, `make api`,
   then
   `curl -i -X POST localhost:8080/v1/notifications -H 'Content-Type: application/json' -d '{"to":"+905551234567","channel":"sms","content":"Hello"}'`.

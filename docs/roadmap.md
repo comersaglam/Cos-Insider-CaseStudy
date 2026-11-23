@@ -155,6 +155,9 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
   messages in flight loses none.
 - **Compose**: the `worker` service joins `compose.yaml`, running the same image, after `migrate`, with
   `restart: unless-stopped` (ADR 0009, 0019).
+- **Decided** ([ADR 0025](adr/0025-worker-in-compose-and-the-provider-stand-in.md)): Compose runs the worker and
+  WireMock as a stand-in provider; `PROVIDER_URL` points the worker at webhook.site. The worker's `/metrics` and
+  `/healthz` server comes with blocks 25 and 26.
 
 ## Phase 3: observability
 

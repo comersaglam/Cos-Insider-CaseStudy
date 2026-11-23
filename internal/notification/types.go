@@ -10,6 +10,11 @@ const (
 	ChannelPush  Channel = "push"
 )
 
+// Channels returns every channel, in a stable order.
+func Channels() []Channel {
+	return []Channel{ChannelSMS, ChannelEmail, ChannelPush}
+}
+
 // Valid reports whether c is one of the known channels. Any string converts to a Channel, so a value that comes
 // from outside is checked with Valid before it is used.
 func (c Channel) Valid() bool {

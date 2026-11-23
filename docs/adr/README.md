@@ -26,12 +26,13 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0016](0016-http-api-and-the-api-process.md) | The HTTP API and the API process | Accepted |
 | [0017](0017-batches.md) | Batches: partial acceptance, kept rejections and a body limit | Accepted |
 | [0018](0018-listing-cancelling-and-retrying.md) | Listing, cancelling and retrying | Accepted |
-| [0019](0019-container-image-and-the-one-command-stack.md) | The container image and the one-command stack | Accepted |
+| [0019](0019-container-image-and-the-one-command-stack.md) | The container image and the one-command stack | Accepted, amended by 0025 |
 | [0020](0020-rabbitmq-platform.md) | The RabbitMQ platform layer: topology, publishing and consuming | Accepted |
 | [0021](0021-outbox-relay-and-scheduler.md) | The outbox relay and the scheduler | Accepted |
 | [0022](0022-provider-client.md) | The provider client | Accepted |
 | [0023](0023-the-consumer.md) | The consumer: claiming, sending, recording, retrying | Accepted |
 | [0024](0024-circuit-breaker.md) | The circuit breaker | Accepted |
+| [0025](0025-worker-in-compose-and-the-provider-stand-in.md) | The worker in Compose, and a stand-in for the provider | Accepted |
 
 ## Template
 

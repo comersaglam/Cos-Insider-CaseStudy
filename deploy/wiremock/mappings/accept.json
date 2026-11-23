@@ -1,0 +1,15 @@
+{
+  "name": "Accepts a notification, as the brief's webhook.site does",
+  "priority": 10,
+  "request": { "method": "POST", "urlPath": "/notify" },
+  "response": {
+    "status": 202,
+    "headers": { "Content-Type": "application/json" },
+    "jsonBody": {
+      "messageId": "{{randomValue type='UUID'}}",
+      "status": "accepted",
+      "timestamp": "{{now}}"
+    },
+    "transformers": ["response-template"]
+  }
+}

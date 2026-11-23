@@ -1,17 +1,21 @@
-# The whole service in one command (docs/adr/0010, 0019): `docker compose up` builds the image, starts PostgreSQL
-# and RabbitMQ, applies the migrations, then serves the API on http://localhost:8080.
+# The whole service in one command (docs/adr/0010, 0019, 0025): `docker compose up` builds the image, starts
+# PostgreSQL, RabbitMQ and a stand-in provider, applies the migrations, then serves the API on
+# http://localhost:8080 and runs the worker, which sends to the stand-in unless PROVIDER_URL names a real provider,
+# such as a webhook.site URL.
 # Tests do not use this file; they start their own containers from the same images, which
 # internal/platform/testenv names and a test keeps equal to the tags below.
 
 name: notifications
 
 # The application's settings, shared by every service that runs the image.
+x-app-env: &app-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-notifications}:${POSTGRES_PASSWORD:-notifications}@postgres:5432/${POSTGRES_DB:-notifications}?sslmode=disable
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
 x-app: &app
   build: .
   image: notifications:local
-  environment:
-    DATABASE_URL: postgres://${POSTGRES_USER:-notifications}:${POSTGRES_PASSWORD:-notifications}@postgres:5432/${POSTGRES_DB:-notifications}?sslmode=disable
-    LOG_LEVEL: ${LOG_LEVEL:-info}
+  environment: *app-env
 
 services:
   postgres:
@@ -74,6 +78,33 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  # Relays, schedules and sends (ADR 0009). Stopped, it finishes the sends in flight; failed, it is restarted, and
+  # RabbitMQ delivers again what it had not acknowledged.
+  worker:
+    <<: *app
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      AMQP_URL: amqp://${RABBITMQ_USER:-notifications}:${RABBITMQ_PASSWORD:-notifications}@rabbitmq:5672/
+      PROVIDER_URL: ${PROVIDER_URL:-http://provider:8080/notify}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      provider:
+        condition: service_started
+    restart: unless-stopped
+
+  # A stand-in for the provider (ADR 0025): WireMock answers 202 as the brief's webhook.site does, and 503 or 422 for
+  # two demonstration numbers. Its admin API lists what it received: http://localhost:8081/__admin/requests
+  provider:
+    image: wiremock/wiremock:3.13.2-3
+    volumes:
+      - ./deploy/wiremock/mappings:/home/wiremock/mappings:ro
+    ports:
+      - "127.0.0.1:${PROVIDER_PORT:-8081}:8080"
 
 volumes:
   postgres-data:

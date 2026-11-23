@@ -49,3 +49,16 @@ func TestPriorityRank(t *testing.T) {
 		t.Errorf("high ranks %d, want MaxPriorityRank %d", PriorityHigh.Rank(), MaxPriorityRank)
 	}
 }
+
+func TestChannelsListsEveryChannelOnce(t *testing.T) {
+	seen := map[Channel]bool{}
+	for _, c := range Channels() {
+		if !c.Valid() || seen[c] {
+			t.Errorf("Channels() holds %q twice or invalid", c)
+		}
+		seen[c] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("Channels() = %d channels, want sms, email and push", len(seen))
+	}
+}
