@@ -1,7 +1,7 @@
 # 24. Worker composition root and an end-to-end test
 
 - Date: 2026-11-23
-- Commits: this block's commit
+- Commits: `840d923`
 - Decisions: [ADR 0025](../adr/0025-worker-in-compose-and-the-provider-stand-in.md), amending
   [ADR 0019](../adr/0019-container-image-and-the-one-command-stack.md); applying ADR 0009
 

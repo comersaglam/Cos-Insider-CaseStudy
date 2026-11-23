@@ -114,7 +114,7 @@ func TestConsumerAgainstRabbitMQAndPostgreSQL(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- NewConsumer(store, NewClient(provider.URL, time.Second), cfg, discard).Run(ctx, deliveries)
+		done <- NewConsumer(store, NewClient(provider.URL, time.Second), cfg, testMetrics(), discard).Run(ctx, deliveries)
 	}()
 
 	want := map[uuid.UUID]notification.Status{

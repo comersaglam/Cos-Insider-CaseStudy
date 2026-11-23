@@ -78,6 +78,8 @@ type Consumer struct {
 	limiter *rate.Limiter
 	breaker breaker
 	cfg     ConsumerConfig
+	metrics *Metrics
+	channel string // the metrics' channel label
 	log     *slog.Logger
 }
 
@@ -86,10 +88,12 @@ type Consumer struct {
 //
 // Its circuit breaker opens after BreakerFailures transient failures in a row, stays open for BreakerOpen, then lets
 // one probe through: a success closes it, a failure opens it again.
-func NewConsumer(s store, snd sender, cfg ConsumerConfig, log *slog.Logger) *Consumer {
+func NewConsumer(s store, snd sender, cfg ConsumerConfig, metrics *Metrics, log *slog.Logger) *Consumer {
 	log = log.With("channel", cfg.Channel)
+	channel := string(cfg.Channel)
+	metrics.breakerState.WithLabelValues(channel).Set(0)
 	return &Consumer{
-		store: s, send: snd, cfg: cfg, log: log,
+		store: s, send: snd, cfg: cfg, metrics: metrics, channel: channel, log: log,
 		limiter: rate.NewLimiter(rate.Limit(cfg.RatePerSecond), 1),
 		breaker: gobreaker.NewTwoStepCircuitBreaker[struct{}](gobreaker.Settings{
 			Name:        string(cfg.Channel),
@@ -98,6 +102,7 @@ func NewConsumer(s store, snd sender, cfg ConsumerConfig, log *slog.Logger) *Con
 			ReadyToTrip: func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= uint32(cfg.BreakerFailures) }, //nolint:gosec // G115: a small positive setting
 			IsExcluded:  func(err error) bool { return errors.Is(err, errNotCounted) },
 			OnStateChange: func(_ string, from, to gobreaker.State) {
+				metrics.breakerState.WithLabelValues(channel).Set(breakerValue(to))
 				log.Warn("circuit breaker changed state", "from", from.String(), "to", to.String())
 			},
 		}),
@@ -155,6 +160,7 @@ func (c *Consumer) Run(ctx context.Context, deliveries <-chan amqp.Delivery) err
 		case <-recheck:
 		case r := <-results:
 			inFlight--
+			c.metrics.inFlight.WithLabelValues(c.channel).Dec()
 			if err := c.settle(r); err != nil {
 				return err
 			}
@@ -162,11 +168,14 @@ func (c *Consumer) Run(ctx context.Context, deliveries <-chan amqp.Delivery) err
 			if !ok {
 				return c.drain(results, inFlight, ErrDeliveriesClosed)
 			}
+			waitStart := time.Now()
 			if err := c.limiter.Wait(ctx); err != nil {
 				// Stopped while waiting for the rate: d is left for RabbitMQ to deliver again.
 				return c.drain(results, inFlight, nil)
 			}
+			c.metrics.limiterWait.WithLabelValues(c.channel).Observe(time.Since(waitStart).Seconds())
 			inFlight++
+			c.metrics.inFlight.WithLabelValues(c.channel).Inc()
 			go func() { results <- c.handle(work, d) }()
 		case <-ctx.Done():
 			return c.drain(results, inFlight, nil)
@@ -180,6 +189,7 @@ func (c *Consumer) drain(results <-chan result, inFlight int, cause error) error
 	for ; inFlight > 0; inFlight-- {
 		select {
 		case r := <-results:
+			c.metrics.inFlight.WithLabelValues(c.channel).Dec()
 			if err := c.settle(r); err != nil {
 				return err
 			}
@@ -225,6 +235,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
 		return result{d: d, action: ack}
 	case errors.Is(err, notification.ErrNotFound):
 		c.log.WarnContext(ctx, "message for a notification that does not exist, dead-lettered", "notification_id", msg.NotificationID)
+		c.metrics.deadLettered.WithLabelValues(c.channel).Inc()
 		return result{d: d, action: reject}
 	case err != nil:
 		return result{d: d, err: fmt.Errorf("claim notification %s: %w", msg.NotificationID, err)}
@@ -233,6 +244,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
 	n := claim.Notification
 	ctx = observability.WithCorrelationID(ctx, n.CorrelationID)
 	if claim.TakenOver {
+		c.metrics.takeovers.WithLabelValues(c.channel).Inc()
 		c.log.WarnContext(ctx, "notification taken over from a lost worker; it may be sent twice",
 			"notification_id", n.ID, "attempt", n.Attempts)
 	}
@@ -248,6 +260,8 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) result {
 	}
 	out := c.sendSafely(ctx, n)
 	done(breakerReport(out))
+	c.metrics.attempts.WithLabelValues(c.channel, string(out.Class)).Inc()
+	c.metrics.latency.WithLabelValues(c.channel).Observe(out.Latency.Seconds())
 	attempt := c.cfg.Policy.After(n.ID, n.Attempts, out, time.Now())
 	switch err := c.store.FinishAttempt(ctx, attempt); {
 	case errors.Is(err, notification.ErrClaimLost):
@@ -282,6 +296,7 @@ func (c *Consumer) unprocessable(ctx context.Context, d amqp.Delivery, cause err
 		}
 	}
 	c.log.WarnContext(ctx, "unprocessable message dead-lettered", "message_id", d.MessageId, "error", cause)
+	c.metrics.deadLettered.WithLabelValues(c.channel).Inc()
 	return result{d: d, action: reject}
 }
 

@@ -248,6 +248,26 @@ paths:
         '500':
           $ref: '#/components/responses/Problem'
 
+  /v1/metrics:
+    get:
+      operationId: getMetricsSummary
+      summary: The service's state as a person reads it
+      description: |
+        Notifications waiting now, by channel and status, and how sending went over the last five minutes: attempts by
+        outcome, the success rate, and the provider's latency percentiles. Computed from the database, so every replica
+        answers the same. Prometheus scrapes `/metrics` on the API (port 8080) and the worker (port 9090) instead.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+      responses:
+        '200':
+          description: The summary.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsSummary'
+        '500':
+          $ref: '#/components/responses/Problem'
+
   /v1/batches:
     post:
       operationId: createBatch
@@ -529,6 +549,52 @@ components:
                 items: { $ref: '#/components/schemas/FieldProblem' }
         correlationId: { type: string }
         createdAt: { type: string, format: date-time, description: 'UTC' }
+
+    MetricsSummary:
+      type: object
+      required: [generatedAt, windowSeconds, channels]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        windowSeconds: { type: integer, description: 'How far back attempts are counted: 300.' }
+        channels:
+          type: object
+          propertyNames: { $ref: '#/components/schemas/Channel' }
+          additionalProperties: { $ref: '#/components/schemas/ChannelSummary' }
+
+    ChannelSummary:
+      type: object
+      required: [waiting, attempts, successRate, latencyMs]
+      properties:
+        waiting:
+          type: object
+          description: Notifications not yet finished, by status.
+          required: [scheduled, queued, retrying, sending]
+          properties:
+            scheduled: { type: integer }
+            queued: { type: integer }
+            retrying: { type: integer }
+            sending: { type: integer }
+        attempts:
+          type: object
+          description: The window's attempts by outcome.
+          required: [success, permanent, permanentAlert, transient, unknown]
+          properties:
+            success: { type: integer }
+            permanent: { type: integer }
+            permanentAlert: { type: integer }
+            transient: { type: integer }
+            unknown: { type: integer }
+        successRate:
+          type: [number, 'null']
+          description: Successful attempts over all of the window's attempts; null when there were none.
+          example: 0.9975
+        latencyMs:
+          type: [object, 'null']
+          description: The provider's latency over the window's answered attempts; null when there were none.
+          properties:
+            p50: { type: number }
+            p95: { type: number }
+            p99: { type: number }
 
     Problem:
       type: object

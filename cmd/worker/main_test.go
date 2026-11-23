@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json/v2"
 	"io"
@@ -81,7 +82,7 @@ func (p *provider) count(to string) int {
 // startWorker runs the worker against a database and a virtual host of the test's own and the given provider,
 // and returns a service to create notifications with, as the API does, and the store to inspect them. The worker
 // stops when stop is called or the test ends, and must stop cleanly.
-func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *notification.Store, stop func()) {
+func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *notification.Store, ops string, stop func()) {
 	t.Helper()
 	srv := httptest.NewServer(p)
 	t.Cleanup(srv.Close)
@@ -99,12 +100,25 @@ func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *n
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+	logs, logsW := io.Pipe()
 	go func() {
 		done <- run(ctx, nil, env(map[string]string{
 			"DATABASE_URL": dsn, "AMQP_URL": amqpURL, "PROVIDER_URL": srv.URL,
 			"PROVIDER_TIMEOUT": "2s", "SHUTDOWN_TIMEOUT": "5s", "MAX_ATTEMPTS": "2", "RETRY_BASE": "50ms",
-			"SCHEDULER_INTERVAL": "50ms", "RELAY_POLL_INTERVAL": "1s",
-		}), io.Discard)
+			"SCHEDULER_INTERVAL": "50ms", "RELAY_POLL_INTERVAL": "1s", "OPS_ADDR": "127.0.0.1:0",
+		}), logsW)
+		_ = logsW.Close()
+	}()
+	// The "worker started" line carries the operations server's address; reading goes on so logging never blocks.
+	opsAddr := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(logs)
+		for scanner.Scan() {
+			var line map[string]any
+			if json.Unmarshal(scanner.Bytes(), &line) == nil && line["msg"] == "worker started" {
+				opsAddr <- line["ops_addr"].(string)
+			}
+		}
 	}()
 	var once sync.Once
 	stop = func() {
@@ -121,7 +135,13 @@ func startWorker(t *testing.T, p *provider) (svc *notification.Service, store *n
 		})
 	}
 	t.Cleanup(stop)
-	return notification.NewService(store, slog.New(slog.DiscardHandler)), store, stop
+	select {
+	case a := <-opsAddr:
+		ops = "http://" + a
+	case <-time.After(30 * time.Second):
+		t.Fatal("the worker did not start within 30 s")
+	}
+	return notification.NewService(store, slog.New(slog.DiscardHandler)), store, ops, stop
 }
 
 func waitForStatus(t *testing.T, store *notification.Store, id uuid.UUID, want notification.Status) notification.Notification {
@@ -149,7 +169,7 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 		}
 		return http.StatusAccepted
 	}}
-	svc, store, _ := startWorker(t, p)
+	svc, store, ops, _ := startWorker(t, p)
 
 	create := func(d notification.Draft) notification.Notification {
 		n, _, err := svc.Create(t.Context(), d, "")
@@ -179,6 +199,29 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 	if records, _ := store.Attempts(t.Context(), push.ID); len(records) != 2 || records[1].StatusCode != 503 {
 		t.Errorf("push attempts = %+v, want two 503s", records)
 	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ops+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	for _, series := range []string{
+		`notifications_delivery_attempts_total{channel="sms",outcome="success"} 1`,
+		`notifications_delivery_attempts_total{channel="push",outcome="transient"} 2`,
+		`notifications_waiting{channel="sms",status="queued"} 0`,
+		`notifications_rabbitmq_queue_messages{queue="notifications.dlq"} 0`,
+		`notifications_circuit_breaker_state{channel="email"} 0`,
+		`notifications_outbox_published_total`,
+	} {
+		if !strings.Contains(string(body), series) {
+			t.Errorf("the worker's /metrics lacks %s", series)
+		}
+	}
 }
 
 // TestWorkerFinishesASendInFlightWhenStopped stops the worker while the provider is still answering: the send
@@ -186,7 +229,7 @@ func TestWorkerDeliversEndToEnd(t *testing.T) {
 func TestWorkerFinishesASendInFlightWhenStopped(t *testing.T) {
 	p := &provider{calls: map[string]int{}, keys: map[string]string{}, answer: func(string) int { return http.StatusAccepted },
 		block: make(chan struct{}), called: make(chan string, 1)}
-	svc, store, stop := startWorker(t, p)
+	svc, store, _, stop := startWorker(t, p)
 
 	n, _, err := svc.Create(t.Context(), notification.Draft{To: "+905551234567", Channel: notification.ChannelSMS, Content: "x", Priority: notification.PriorityNormal}, "")
 	if err != nil {

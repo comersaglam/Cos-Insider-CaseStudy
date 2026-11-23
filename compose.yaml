@@ -88,6 +88,9 @@ services:
       <<: *app-env
       AMQP_URL: amqp://${RABBITMQ_USER:-notifications}:${RABBITMQ_PASSWORD:-notifications}@rabbitmq:5672/
       PROVIDER_URL: ${PROVIDER_URL:-http://provider:8080/notify}
+    # The operations server: /metrics for Prometheus.
+    ports:
+      - "127.0.0.1:${WORKER_OPS_PORT:-9090}:9090"
     depends_on:
       migrate:
         condition: service_completed_successfully

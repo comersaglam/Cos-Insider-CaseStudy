@@ -22,6 +22,7 @@
 //	RELAY_POLL_INTERVAL  the relay's fallback poll when no notification wakes it (default 5s)
 //	SCHEDULER_INTERVAL   how often due work is queued and lost work reaped (default 1s)
 //	SHUTDOWN_TIMEOUT     how long sends in flight may take to finish when stopping (default 15s)
+//	OPS_ADDR             where the operations server serves /metrics (default :9090)
 package main
 
 import (
@@ -29,6 +30,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -41,6 +44,7 @@ import (
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/dispatch"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/config"
+	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/httpx"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/postgres"
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
@@ -103,6 +107,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	pollInterval := cfg.Duration("RELAY_POLL_INTERVAL", 5*time.Second)
 	schedulerInterval := cfg.Duration("SCHEDULER_INTERVAL", time.Second)
 	shutdownTimeout := cfg.Duration("SHUTDOWN_TIMEOUT", 15*time.Second)
+	opsAddr := cfg.String("OPS_ADDR", ":9090")
 	if err := cfg.Err(); err != nil {
 		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
@@ -139,16 +144,32 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	defer func() { _ = pub.Close() }()
 	client := delivery.NewClient(providerURL, providerTimeout)
 
+	// The metrics (ADR 0026), served by the operations server; queue depths are read when Prometheus scrapes.
+	reg := observability.NewRegistry()
+	deliveryMetrics, dispatchMetrics := delivery.NewMetrics(reg), dispatch.NewMetrics(reg)
+	queues := []string{top.DeadLetter}
+	for _, q := range top.Queues {
+		queues = append(queues, q.Name)
+	}
+	reg.MustRegister(notification.NewWaitingCollector(store), rabbitmq.NewQueueDepthCollector(conn, queues))
+	ops := http.NewServeMux()
+	ops.Handle("GET /metrics", observability.MetricsHandler(reg))
+	opsListener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", opsAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", opsAddr, err)
+	}
+
 	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return httpx.Serve(gctx, httpx.NewServer(ops, log), opsListener, shutdownTimeout) })
 	g.Go(func() error {
 		return dispatch.NewRelay(store, listener, pub, dispatch.RelayConfig{
 			Exchange: top.Exchange, BatchSize: relayBatch, PollInterval: pollInterval,
-		}, log).Run(gctx)
+		}, dispatchMetrics, log).Run(gctx)
 	})
 	g.Go(func() error {
 		return dispatch.NewScheduler(store, dispatch.SchedulerConfig{
 			Interval: schedulerInterval, BatchSize: schedulerBatch, MaxAttempts: policy.MaxAttempts,
-		}, log).Run(gctx)
+		}, dispatchMetrics, log).Run(gctx)
 	})
 	for _, q := range top.Queues {
 		// Each consumer owns its channel: an AMQP channel must not be shared between goroutines (ADR 0009).
@@ -165,7 +186,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 			Channel: notification.Channel(q.RoutingKey), Concurrency: concurrency, RatePerSecond: float64(ratePerSecond),
 			Lease: providerTimeout + leaseMargin, Policy: policy, ShutdownTimeout: shutdownTimeout,
 			BreakerFailures: breakerFailures, BreakerOpen: breakerOpen,
-		}, log)
+		}, deliveryMetrics, log)
 		g.Go(func() error { return consumer.Run(gctx, deliveries) })
 	}
 	// A lost connection stops the process; nothing reconnects in-process (ADR 0009).
@@ -179,7 +200,8 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 		}
 	})
 
-	log.InfoContext(ctx, "worker started", "queues", len(top.Queues), "concurrency", concurrency, "rate_per_second", ratePerSecond)
+	log.InfoContext(ctx, "worker started", "queues", len(top.Queues), "concurrency", concurrency,
+		"rate_per_second", ratePerSecond, "ops_addr", opsListener.Addr().String())
 	if err := g.Wait(); err != nil {
 		log.ErrorContext(ctx, "worker stopped by a failure", "error", err)
 		return err

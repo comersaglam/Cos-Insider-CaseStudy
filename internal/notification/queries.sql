@@ -199,3 +199,33 @@ SELECT * FROM delivery_attempts WHERE notification_id = @notification_id ORDER B
 UPDATE notifications
 SET status = 'queued', claimed_until = NULL, attempts = attempts - 1, updated_at = now()
 WHERE id = @id AND status = 'sending' AND attempts = @attempt;
+
+-- name: CountWaiting :many
+-- Notifications not yet finished, by channel and status.
+SELECT channel, status, count(*)::integer AS count
+FROM notifications
+WHERE status IN ('scheduled', 'queued', 'retrying', 'sending')
+GROUP BY channel, status;
+
+-- name: CountOutbox :one
+SELECT count(*)::integer FROM outbox;
+
+-- name: CountAttemptsSince :many
+-- Attempts made in the window, by channel and outcome.
+SELECT n.channel, a.outcome, count(*)::integer AS count
+FROM delivery_attempts a
+JOIN notifications n ON n.id = a.notification_id
+WHERE a.created_at >= now() - sqlc.arg(window_ms)::integer * interval '1 millisecond'
+GROUP BY n.channel, a.outcome;
+
+-- name: AttemptLatencySince :many
+-- The provider's latency over the window's answered attempts, by channel.
+SELECT n.channel,
+       (percentile_cont(0.50) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p50,
+       (percentile_cont(0.95) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p95,
+       (percentile_cont(0.99) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p99
+FROM delivery_attempts a
+JOIN notifications n ON n.id = a.notification_id
+WHERE a.created_at >= now() - sqlc.arg(window_ms)::integer * interval '1 millisecond'
+  AND a.outcome <> 'unknown'
+GROUP BY n.channel;

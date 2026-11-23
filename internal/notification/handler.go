@@ -29,6 +29,7 @@ type service interface {
 	Cancel(ctx context.Context, id uuid.UUID) (Notification, error)
 	Retry(ctx context.Context, id uuid.UUID) (Notification, error)
 	RetryFailed(ctx context.Context, f RetryFilter) (RetryResult, error)
+	Summary(ctx context.Context) (Summary, error)
 }
 
 // Handler serves the notification and batch endpoints. It reads requests and writes answers; the rules are in
@@ -53,6 +54,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /v1/notifications/{id}/cancel", httpx.Handle(h.log, h.cancel))
 	mux.Handle("POST /v1/notifications/{id}/retry", httpx.Handle(h.log, h.retry))
 	mux.Handle("POST /v1/notifications/retry", httpx.Handle(h.log, h.retryFailed))
+	mux.Handle("GET /v1/metrics", httpx.Handle(h.log, h.summary))
 	mux.Handle("POST /v1/batches", httpx.Handle(h.log, h.createBatch))
 	mux.Handle("GET /v1/batches/{id}", httpx.Handle(h.log, h.getBatch))
 }

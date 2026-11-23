@@ -163,11 +163,11 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 
 ### 25. Metrics
 - **Scope**: HTTP request counts and latency histograms; sends per channel and outcome; provider latency; queue
-  depth (waiting rows per status in PostgreSQL, ready messages in RabbitMQ, the dead-letter queue's depth)
-  collected on scrape; breaker state;
-  rate-limiter wait.
+  depth (waiting rows per status in PostgreSQL, ready messages in RabbitMQ) collected on scrape; breaker state;
+  rate-limiter wait; `GET /v1/metrics`, a JSON summary for people.
 - **Watch**: label cardinality (a notification ID is never a label).
-- **Open question**: Prometheus `/metrics` alone, or also a JSON summary endpoint for people; Grafana in Compose.
+- **Decided** ([ADR 0026](adr/0026-metrics.md)): Prometheus `/metrics` on the API and on the worker's operations
+  server (`:9090`), plus the summary computed from the database; Grafana comes with block 35.
 
 ### 26. Health
 - `/healthz` (the process runs) and `/readyz` (PostgreSQL and RabbitMQ answer); Compose health checks use them.
@@ -183,10 +183,17 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 - `api/openapi.yaml` (3.1), written by hand since block 15 ([ADR 0016](adr/0016-http-api-and-the-api-process.md)),
   served with Swagger UI at `/docs`; a test checks every registered route is in the spec and the spec is valid,
   with a pinned validator.
+- **Detailed, as the owner asked**: every operation with its purpose, every parameter and member described, an
+  example for every request and answer, every error code listed where it can occur, and the behaviours a client
+  relies on (idempotency, pagination, partial batches, cancellation, retries) told in the operations' text.
 
 ### 29. README
-- Setup, architecture diagram (Mermaid), curl examples, a summary of the decisions linking the ADRs, and what is
-  deliberately out of scope.
+- **Setup, run and test first**, through the make targets (`make up`, `make smoke`, `make test`, `make deps`,
+  `make api`, ...), then curl examples, a summary of the decisions linking the ADRs, and what is deliberately out of
+  scope.
+- **An architecture diagram in D2**, drawn last, after researching how to make it look best (layout engine, theme,
+  icons, rendering to SVG for GitHub).
+- Screenshots from block 35 (Grafana, load tests) embedded from `docs/images`.
 
 ### 30. CI (GitHub Actions)
 - Lint, `test -race`, `govulncheck`, a check that generated `sqlc` code is current, Docker build.
@@ -199,7 +206,7 @@ endpoint shapes) are settled when a block starts; *Open question* marks what is 
 | 32 | Templates | `text/template`; a templates table with CRUD; a missing variable is an error. |
 | 33 | WebSocket status updates | `LISTEN/NOTIFY` → hub → clients; the library is chosen in that block. |
 | 34 | Distributed tracing | OpenTelemetry propagated over HTTP and AMQP headers; Jaeger in Compose. |
-| 35 | Load and burst test | A script and results in the README showing the rate limit and priorities at work. |
+| 35 | Load test and Grafana | Prometheus and Grafana in Compose with a provisioned dashboard. Load tests at several scales (hundreds to tens of thousands of notifications), the large ones repeated with several seeds of a reproducible workload (channels, priorities, failing recipients); each run watched in Grafana, screenshots saved in `docs/images` and shown in the README: the rate limit, priorities, retries and the breaker at work. |
 
 Failure handling is covered by retries, the circuit breaker, the dead-letter queue and the retry endpoint (blocks
 13, 17, 22, 23); CI/CD by block 30.

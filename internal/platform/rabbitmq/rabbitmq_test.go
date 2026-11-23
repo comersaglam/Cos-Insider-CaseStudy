@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/rabbitmq"
@@ -340,5 +341,36 @@ func TestPublishStopsWhenTheContextHasEnded(t *testing.T) {
 	}
 	if d := depth(t, conn, top.Queues[0].Name); d != 0 {
 		t.Errorf("the queue holds %d, want nothing published", d)
+	}
+}
+
+func TestQueueDepthCollectorReadsTheQueuesOnScrape(t *testing.T) {
+	t.Parallel()
+	conn, top := setup(t)
+	declare(t, conn, top)
+	pub, err := rabbitmq.NewPublisher(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pub.Close() }()
+	for _, id := range []string{"n1", "n2"} {
+		if err := pub.Publish(t.Context(), rabbitmq.Message{Exchange: top.Exchange, RoutingKey: "sms", ID: id, Body: []byte("x")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := rabbitmq.NewQueueDepthCollector(conn, []string{top.Queues[0].Name, top.DeadLetter})
+	want := `
+# HELP notifications_rabbitmq_queue_consumers Consumers of each queue, counted when scraped; with single active consumer one of them receives.
+# TYPE notifications_rabbitmq_queue_consumers gauge
+notifications_rabbitmq_queue_consumers{queue="` + top.DeadLetter + `"} 0
+notifications_rabbitmq_queue_consumers{queue="` + top.Queues[0].Name + `"} 0
+# HELP notifications_rabbitmq_queue_messages Messages ready in each queue, counted when scraped.
+# TYPE notifications_rabbitmq_queue_messages gauge
+notifications_rabbitmq_queue_messages{queue="` + top.DeadLetter + `"} 0
+notifications_rabbitmq_queue_messages{queue="` + top.Queues[0].Name + `"} 2
+`
+	if err := testutil.CollectAndCompare(c, strings.NewReader(want)); err != nil {
+		t.Error(err)
 	}
 }

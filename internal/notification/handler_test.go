@@ -30,6 +30,11 @@ type fakeService struct {
 	page        Page
 	retryFilter []RetryFilter
 	retried     RetryResult
+	summary     Summary
+}
+
+func (f *fakeService) Summary(context.Context) (Summary, error) {
+	return f.summary, f.err
 }
 
 func (f *fakeService) List(_ context.Context, filter ListFilter, after *Cursor, limit int) (Page, error) {

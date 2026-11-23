@@ -45,7 +45,7 @@ func TestRouter(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			log := observability.NewLogger(&logs, slog.LevelInfo)
-			h := NewRouter(log, notification.NewHandler(noNotifications{}, log, 1<<20))
+			h := NewRouter(log, observability.NewRegistry(), notification.NewHandler(noNotifications{}, log, 1<<20))
 
 			r := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, nil)
 			r.Header.Set(observability.CorrelationHeader, "trace-me")
@@ -67,5 +67,17 @@ func TestRouter(t *testing.T) {
 				t.Errorf("no access log line with the correlation ID:\n%s", logs.String())
 			}
 		})
+	}
+}
+
+func TestRouterServesMetrics(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	h := NewRouter(log, observability.NewRegistry(), notification.NewHandler(noNotifications{}, log, 1<<20))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/unknown", nil))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `notifications_http_requests_total{method="GET",route="unmatched",status="404"} 1`) {
+		t.Errorf("GET /metrics = %d, want the request just made counted:\n%.500s", rec.Code, rec.Body)
 	}
 }

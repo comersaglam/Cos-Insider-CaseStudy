@@ -52,7 +52,7 @@ func TestBreakerOpensAndStopsTakingMessages(t *testing.T) {
 	var a acks
 	store := &fakeStore{}
 	sender := &scriptedSender{script: []Outcome{unavailable}}
-	c := NewConsumer(store, sender, breakerConfig(), discard)
+	c := NewConsumer(store, sender, breakerConfig(), testMetrics(), discard)
 
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -78,7 +78,7 @@ func TestBreakerProbesAndCloses(t *testing.T) {
 	cfg := breakerConfig()
 	cfg.BreakerOpen = 200 * time.Millisecond
 	sender := &scriptedSender{script: []Outcome{unavailable, unavailable, unavailable, {Class: Success, StatusCode: 202}}}
-	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, discard), messages(t, &a, 6), &a, 6); err != nil {
+	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, testMetrics(), discard), messages(t, &a, 6), &a, 6); err != nil {
 		t.Fatal(err)
 	}
 	if sender.sends.Load() != 6 {
@@ -96,7 +96,7 @@ func TestBreakerIgnoresAnswersThatSayNothingOfTheProvidersHealth(t *testing.T) {
 		{Class: PermanentAlert, StatusCode: 401, Err: errors.New("unauthorized")},
 		{Class: Transient, StatusCode: 429, Err: errors.New("slow down")},
 	}}
-	c := NewConsumer(&fakeStore{}, sender, breakerConfig(), discard)
+	c := NewConsumer(&fakeStore{}, sender, breakerConfig(), testMetrics(), discard)
 	if err := runUntilSettled(t, c, messages(t, &a, 8), &a, 8); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestARefusedSendReleasesItsClaim(t *testing.T) {
 	var a acks
 	store := &fakeStore{}
 	sender := &scriptedSender{script: []Outcome{{Class: Success}}}
-	c := NewConsumer(store, sender, testConfig(), discard)
+	c := NewConsumer(store, sender, testConfig(), testMetrics(), discard)
 	c.breaker = closedBreaker{}
 
 	if err := runUntilSettled(t, c, messages(t, &a, 1), &a, 1); err != nil {

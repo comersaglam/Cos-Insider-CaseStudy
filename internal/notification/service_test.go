@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
@@ -40,6 +41,10 @@ func (f *fakeStore) Cancel(_ context.Context, id uuid.UUID) (Notification, error
 
 func (f *fakeStore) Retry(_ context.Context, id uuid.UUID) (Notification, error) {
 	return Notification{ID: id, Status: StatusQueued}, f.err
+}
+
+func (f *fakeStore) Summary(_ context.Context, window time.Duration) (Summary, error) {
+	return Summary{Window: window}, f.err
 }
 
 func (f *fakeStore) CountFailed(context.Context, RetryFilter) (int, error) {

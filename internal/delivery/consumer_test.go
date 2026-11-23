@@ -172,7 +172,7 @@ var discard = slog.New(slog.DiscardHandler)
 func TestConsumerSendsRecordsAndAcknowledges(t *testing.T) {
 	var a acks
 	store := &fakeStore{}
-	c := NewConsumer(store, fakeSender{out: Outcome{Class: Success, StatusCode: 202, MessageID: "m-1"}}, testConfig(), discard)
+	c := NewConsumer(store, fakeSender{out: Outcome{Class: Success, StatusCode: 202, MessageID: "m-1"}}, testConfig(), testMetrics(), discard)
 
 	if err := runUntilSettled(t, c, deliveriesOf(&a, message(t), message(t)), &a, 2); err != nil {
 		t.Fatalf("Run = %v", err)
@@ -188,7 +188,7 @@ func TestConsumerSendsRecordsAndAcknowledges(t *testing.T) {
 func TestConsumerRetriesATransientFailure(t *testing.T) {
 	var a acks
 	store := &fakeStore{}
-	c := NewConsumer(store, fakeSender{out: Outcome{Class: Transient, StatusCode: 503, Err: errors.New("busy")}}, testConfig(), discard)
+	c := NewConsumer(store, fakeSender{out: Outcome{Class: Transient, StatusCode: 503, Err: errors.New("busy")}}, testConfig(), testMetrics(), discard)
 	if err := runUntilSettled(t, c, deliveriesOf(&a, message(t)), &a, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestConsumerSettlesMessagesItCannotSend(t *testing.T) {
 			var a acks
 			store := &fakeStore{claimErr: tt.claimErr}
 			sends := 0
-			c := NewConsumer(store, fakeSender{out: Outcome{Class: Success}, during: func() { sends++ }}, testConfig(), discard)
+			c := NewConsumer(store, fakeSender{out: Outcome{Class: Success}, during: func() { sends++ }}, testConfig(), testMetrics(), discard)
 			if err := runUntilSettled(t, c, deliveriesOf(&a, tt.delivery), &a, 1); err != nil {
 				t.Fatal(err)
 			}
@@ -235,7 +235,7 @@ func TestConsumerSettlesMessagesItCannotSend(t *testing.T) {
 
 func TestConsumerAcknowledgesAnOutcomeWhoseClaimWasLost(t *testing.T) {
 	var a acks
-	c := NewConsumer(&fakeStore{finishErr: notification.ErrClaimLost}, fakeSender{out: Outcome{Class: Success}}, testConfig(), discard)
+	c := NewConsumer(&fakeStore{finishErr: notification.ErrClaimLost}, fakeSender{out: Outcome{Class: Success}}, testConfig(), testMetrics(), discard)
 	if err := runUntilSettled(t, c, deliveriesOf(&a, message(t)), &a, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestConsumerAcknowledgesAnOutcomeWhoseClaimWasLost(t *testing.T) {
 func TestConsumerRecordsAPanickingSendAsAFailedAttempt(t *testing.T) {
 	var a acks
 	store := &fakeStore{}
-	c := NewConsumer(store, fakeSender{during: func() { panic("nil map write") }}, testConfig(), discard)
+	c := NewConsumer(store, fakeSender{during: func() { panic("nil map write") }}, testConfig(), testMetrics(), discard)
 	if err := runUntilSettled(t, c, deliveriesOf(&a, message(t)), &a, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestConsumerRecordsAPanickingSendAsAFailedAttempt(t *testing.T) {
 // left unsettled, so RabbitMQ delivers it again.
 func TestConsumerStopsWhenTheDatabaseFails(t *testing.T) {
 	var a acks
-	c := NewConsumer(&fakeStore{claimErr: errors.New("connection lost")}, fakeSender{}, testConfig(), discard)
+	c := NewConsumer(&fakeStore{claimErr: errors.New("connection lost")}, fakeSender{}, testConfig(), testMetrics(), discard)
 	if err := c.Run(t.Context(), deliveriesOf(&a, message(t))); err == nil {
 		t.Fatal("Run = nil, want the database error")
 	}
@@ -292,7 +292,7 @@ func TestConsumerSendsAtMostConcurrencyAtOnce(t *testing.T) {
 	for range 30 {
 		msgs = append(msgs, message(t))
 	}
-	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, discard), deliveriesOf(&a, msgs...), &a, 30); err != nil {
+	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, testMetrics(), discard), deliveriesOf(&a, msgs...), &a, 30); err != nil {
 		t.Fatal(err)
 	}
 	if top.Load() != 3 {
@@ -311,7 +311,7 @@ func TestConsumerDoesNotDeadlockAtFullConcurrency(t *testing.T) {
 	for range 20 {
 		msgs = append(msgs, message(t))
 	}
-	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, fakeSender{out: Outcome{Class: Success}}, cfg, discard), deliveriesOf(&a, msgs...), &a, 20); err != nil {
+	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, fakeSender{out: Outcome{Class: Success}}, cfg, testMetrics(), discard), deliveriesOf(&a, msgs...), &a, 20); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -336,7 +336,7 @@ func TestConsumerKeepsToTheRate(t *testing.T) {
 		msgs = append(msgs, message(t))
 	}
 	start := time.Now()
-	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, discard), deliveriesOf(&a, msgs...), &a, 60); err != nil {
+	if err := runUntilSettled(t, NewConsumer(&fakeStore{}, sender, cfg, testMetrics(), discard), deliveriesOf(&a, msgs...), &a, 60); err != nil {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took < time.Second {
@@ -375,7 +375,7 @@ func TestConsumerFinishesSendsInFlightWhenStopped(t *testing.T) {
 
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- NewConsumer(store, sender, cfg, discard).Run(ctx, deliveries) }()
+	go func() { done <- NewConsumer(store, sender, cfg, testMetrics(), discard).Run(ctx, deliveries) }()
 	<-started
 	stop()
 	deliveries <- second

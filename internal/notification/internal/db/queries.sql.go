@@ -12,6 +12,51 @@ import (
 	"uuid"
 )
 
+const attemptLatencySince = `-- name: AttemptLatencySince :many
+SELECT n.channel,
+       (percentile_cont(0.50) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p50,
+       (percentile_cont(0.95) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p95,
+       (percentile_cont(0.99) WITHIN GROUP (ORDER BY a.duration_ms))::float8 AS p99
+FROM delivery_attempts a
+JOIN notifications n ON n.id = a.notification_id
+WHERE a.created_at >= now() - $1::integer * interval '1 millisecond'
+  AND a.outcome <> 'unknown'
+GROUP BY n.channel
+`
+
+type AttemptLatencySinceRow struct {
+	Channel string
+	P50     float64
+	P95     float64
+	P99     float64
+}
+
+// The provider's latency over the window's answered attempts, by channel.
+func (q *Queries) AttemptLatencySince(ctx context.Context, windowMs int) ([]AttemptLatencySinceRow, error) {
+	rows, err := q.db.Query(ctx, attemptLatencySince, windowMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttemptLatencySinceRow
+	for rows.Next() {
+		var i AttemptLatencySinceRow
+		if err := rows.Scan(
+			&i.Channel,
+			&i.P50,
+			&i.P95,
+			&i.P99,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelNotification = `-- name: CancelNotification :one
 UPDATE notifications SET status = 'cancelled', next_attempt_at = NULL, updated_at = now()
 WHERE id = $1 AND status = ANY ($2::text[])
@@ -163,6 +208,41 @@ type CopyBatchNotificationsParams struct {
 	BatchIndex    *int
 }
 
+const countAttemptsSince = `-- name: CountAttemptsSince :many
+SELECT n.channel, a.outcome, count(*)::integer AS count
+FROM delivery_attempts a
+JOIN notifications n ON n.id = a.notification_id
+WHERE a.created_at >= now() - $1::integer * interval '1 millisecond'
+GROUP BY n.channel, a.outcome
+`
+
+type CountAttemptsSinceRow struct {
+	Channel string
+	Outcome string
+	Count   int
+}
+
+// Attempts made in the window, by channel and outcome.
+func (q *Queries) CountAttemptsSince(ctx context.Context, windowMs int) ([]CountAttemptsSinceRow, error) {
+	rows, err := q.db.Query(ctx, countAttemptsSince, windowMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountAttemptsSinceRow
+	for rows.Next() {
+		var i CountAttemptsSinceRow
+		if err := rows.Scan(&i.Channel, &i.Outcome, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countBatchStatuses = `-- name: CountBatchStatuses :many
 SELECT status, count(*)::integer AS count FROM notifications WHERE batch_id = $1 GROUP BY status
 `
@@ -217,6 +297,51 @@ func (q *Queries) CountFailedNotifications(ctx context.Context, arg CountFailedN
 	var column_1 int
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countOutbox = `-- name: CountOutbox :one
+SELECT count(*)::integer FROM outbox
+`
+
+func (q *Queries) CountOutbox(ctx context.Context) (int, error) {
+	row := q.db.QueryRow(ctx, countOutbox)
+	var column_1 int
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countWaiting = `-- name: CountWaiting :many
+SELECT channel, status, count(*)::integer AS count
+FROM notifications
+WHERE status IN ('scheduled', 'queued', 'retrying', 'sending')
+GROUP BY channel, status
+`
+
+type CountWaitingRow struct {
+	Channel string
+	Status  string
+	Count   int
+}
+
+// Notifications not yet finished, by channel and status.
+func (q *Queries) CountWaiting(ctx context.Context) ([]CountWaitingRow, error) {
+	rows, err := q.db.Query(ctx, countWaiting)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWaitingRow
+	for rows.Next() {
+		var i CountWaitingRow
+		if err := rows.Scan(&i.Channel, &i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteOutbox = `-- name: DeleteOutbox :exec

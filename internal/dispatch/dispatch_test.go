@@ -12,6 +12,8 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/notification"
@@ -21,6 +23,8 @@ import (
 )
 
 var discard = slog.New(slog.DiscardHandler)
+
+func testMetrics() *Metrics { return NewMetrics(prometheus.NewRegistry()) }
 
 // newStore returns a notification store over a fresh database of the test's own, and its pool.
 func newStore(t *testing.T) (*notification.Store, *pgxpool.Pool) {
@@ -81,7 +85,7 @@ func startRelay(t *testing.T, store *notification.Store, conn *amqp.Connection, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay := NewRelay(store, listener, pub, RelayConfig{Exchange: top.Exchange, BatchSize: 10, PollInterval: poll}, discard)
+	relay := NewRelay(store, listener, pub, RelayConfig{Exchange: top.Exchange, BatchSize: 10, PollInterval: poll}, testMetrics(), discard)
 
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -222,7 +226,7 @@ func TestRelayStopsWhenRabbitMQIsDownAndTheRowsWait(t *testing.T) {
 	create(t, store, notification.ChannelSMS, "+905551234567", notification.PriorityNormal)
 	cfg := RelayConfig{Exchange: "notifications", BatchSize: 10, PollInterval: time.Second}
 
-	if err := NewRelay(store, noWait{}, failingPublisher{}, cfg, discard).Run(t.Context()); err == nil {
+	if err := NewRelay(store, noWait{}, failingPublisher{}, cfg, testMetrics(), discard).Run(t.Context()); err == nil {
 		t.Fatal("Run = nil while publishing fails, want the error")
 	}
 	if n := outboxRows(t, pool); n != 1 {
@@ -232,7 +236,7 @@ func TestRelayStopsWhenRabbitMQIsDownAndTheRowsWait(t *testing.T) {
 	var pub recordingPublisher
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- NewRelay(store, noWait{}, &pub, cfg, discard).Run(ctx) }()
+	go func() { done <- NewRelay(store, noWait{}, &pub, cfg, testMetrics(), discard).Run(ctx) }()
 	waitFor(t, "the row to be published", func() bool { return outboxRows(t, pool) == 0 })
 	stop()
 	if err := <-done; err != nil {
@@ -257,7 +261,7 @@ func TestSchedulerQueuesWhatIsDue(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, discard).Run(ctx)
+		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, testMetrics(), discard).Run(ctx)
 	}()
 	waitFor(t, "the due notification to be queued", func() bool {
 		n, err := store.Get(t.Context(), due.ID)
@@ -288,10 +292,10 @@ func (brokenStore) DrainOutbox(context.Context, int, func(context.Context, []not
 }
 
 func TestLoopsStopWithTheDatabaseError(t *testing.T) {
-	if err := NewScheduler(brokenStore{}, SchedulerConfig{Interval: time.Second, BatchSize: 10, MaxAttempts: 8}, discard).Run(t.Context()); err == nil {
+	if err := NewScheduler(brokenStore{}, SchedulerConfig{Interval: time.Second, BatchSize: 10, MaxAttempts: 8}, testMetrics(), discard).Run(t.Context()); err == nil {
 		t.Error("scheduler: Run = nil, want the database error")
 	}
-	if err := NewRelay(brokenStore{}, noWait{}, &recordingPublisher{}, RelayConfig{BatchSize: 10, PollInterval: time.Second}, discard).Run(t.Context()); err == nil {
+	if err := NewRelay(brokenStore{}, noWait{}, &recordingPublisher{}, RelayConfig{BatchSize: 10, PollInterval: time.Second}, testMetrics(), discard).Run(t.Context()); err == nil {
 		t.Error("relay: Run = nil, want the database error")
 	}
 }
@@ -312,7 +316,7 @@ func TestSchedulerReapsALostWorkersNotification(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, discard).Run(ctx)
+		done <- NewScheduler(store, SchedulerConfig{Interval: 50 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, testMetrics(), discard).Run(ctx)
 	}()
 	waitFor(t, "the lost notification to be queued again", func() bool {
 		got, err := store.Get(t.Context(), n.ID)
@@ -324,5 +328,30 @@ func TestSchedulerReapsALostWorkersNotification(t *testing.T) {
 	}
 	if records, _ := store.Attempts(t.Context(), n.ID); len(records) != 1 || records[0].Outcome != notification.OutcomeUnknown {
 		t.Errorf("records = %+v, want the lost attempt as unknown", records)
+	}
+}
+
+func TestLoopsCountWhatTheyMove(t *testing.T) {
+	t.Parallel()
+	store, pool := newStore(t)
+	create(t, store, notification.ChannelSMS, "+905551234567", notification.PriorityNormal)
+	due := create(t, store, notification.ChannelSMS, "+905551234568", notification.PriorityNormal)
+	if _, err := pool.Exec(t.Context(), "UPDATE notifications SET status = 'retrying', next_attempt_at = now() WHERE id = $1", due.ID); err != nil {
+		t.Fatal(err)
+	}
+	m := testMetrics()
+
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	var pub recordingPublisher
+	go func() {
+		_ = NewRelay(store, noWait{}, &pub, RelayConfig{BatchSize: 10, PollInterval: time.Second}, m, discard).Run(ctx)
+	}()
+	go func() {
+		_ = NewScheduler(store, SchedulerConfig{Interval: 20 * time.Millisecond, BatchSize: 10, MaxAttempts: 8}, m, discard).Run(ctx)
+	}()
+	waitFor(t, "the queued and the due notification to be published", func() bool { return testutil.ToFloat64(m.published) >= 3 })
+	if got := testutil.ToFloat64(m.queued); got != 1 {
+		t.Errorf("queued = %v, want the one due", got)
 	}
 }

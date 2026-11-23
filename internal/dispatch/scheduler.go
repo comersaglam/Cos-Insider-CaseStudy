@@ -27,14 +27,15 @@ type SchedulerConfig struct {
 // their next attempt (ADR 0006). Queueing writes their outbox rows, whose trigger wakes the relay. Before that, as
 // the reaper of ADR 0012, it returns notifications whose worker's lease ran out to retrying, due at once.
 type Scheduler struct {
-	due due
-	cfg SchedulerConfig
-	log *slog.Logger
+	due     due
+	cfg     SchedulerConfig
+	metrics *Metrics
+	log     *slog.Logger
 }
 
 // NewScheduler returns a scheduler over the given storage.
-func NewScheduler(d due, cfg SchedulerConfig, log *slog.Logger) *Scheduler {
-	return &Scheduler{due: d, cfg: cfg, log: log}
+func NewScheduler(d due, cfg SchedulerConfig, metrics *Metrics, log *slog.Logger) *Scheduler {
+	return &Scheduler{due: d, cfg: cfg, metrics: metrics, log: log}
 }
 
 // Run queues due work every Interval until ctx ends, then returns nil; it returns an error when the database
@@ -58,6 +59,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 				return fmt.Errorf("queue due notifications: %w", err)
 			}
 			if n > 0 {
+				s.metrics.queued.Add(float64(n))
 				s.log.InfoContext(ctx, "due notifications queued", "queued", n)
 			}
 			if n < s.cfg.BatchSize {
@@ -80,6 +82,7 @@ func (s *Scheduler) reap(ctx context.Context) error {
 			return fmt.Errorf("reap expired claims: %w", err)
 		}
 		if n > 0 {
+			s.metrics.reaped.Add(float64(n))
 			s.log.WarnContext(ctx, "notifications of lost workers reaped", "reaped", n)
 		}
 		if n < s.cfg.BatchSize {

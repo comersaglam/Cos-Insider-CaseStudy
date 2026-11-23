@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 	"uuid"
 
 	"github.com/comersaglam/Cos-Insider-CaseStudy/internal/platform/observability"
@@ -21,6 +22,7 @@ type store interface {
 	Retry(ctx context.Context, id uuid.UUID) (Notification, error)
 	CountFailed(ctx context.Context, f RetryFilter) (int, error)
 	RequeueFailed(ctx context.Context, f RetryFilter, maxRows int) (int, error)
+	Summary(ctx context.Context, window time.Duration) (Summary, error)
 }
 
 // Service holds the notification use cases. It knows the rules; it neither reads requests nor writes SQL.
@@ -131,4 +133,9 @@ func correlationIDOf(ctx context.Context) string {
 		return id
 	}
 	return observability.NewCorrelationID()
+}
+
+// Summary returns what waits now and how sending went over the last SummaryWindow (ADR 0026).
+func (s *Service) Summary(ctx context.Context) (Summary, error) {
+	return s.store.Summary(ctx, SummaryWindow)
 }

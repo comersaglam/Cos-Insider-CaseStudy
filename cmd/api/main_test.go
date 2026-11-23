@@ -176,6 +176,28 @@ func TestAPIEndToEnd(t *testing.T) {
 	if status, _, p := call(t, http.MethodGet, base+"/v1/nothing", "", nil); status != 404 || p["code"] != "not_found" {
 		t.Errorf("unknown path = %d %v", status, p)
 	}
+
+	status, _, summary := call(t, http.MethodGet, base+"/v1/metrics", "", nil)
+	channels, _ := summary["channels"].(map[string]any)
+	smsSummary, _ := channels["sms"].(map[string]any)
+	waiting, _ := smsSummary["waiting"].(map[string]any)
+	if status != http.StatusOK || waiting["queued"] != float64(1) {
+		t.Errorf("GET /v1/metrics = %d, sms waiting %v; want the one queued notification", status, waiting)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	metrics, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(metrics), `notifications_http_requests_total{method="POST",route="/v1/notifications",status="202"}`) {
+		t.Errorf("/metrics does not count the creates:\n%.400s", metrics)
+	}
 }
 
 // TestAPIBatchEndToEnd sends a batch with one invalid item among valid ones: the valid ones are accepted and can

@@ -38,16 +38,17 @@ type RelayConfig struct {
 // Relay hands committed outbox rows to RabbitMQ (ADR 0003): it publishes them with confirms and deletes them in the
 // transaction that locked them. It wakes when the outbox's trigger notifies, and at least every PollInterval.
 type Relay struct {
-	outbox outbox
-	wake   waker
-	pub    publisher
-	cfg    RelayConfig
-	log    *slog.Logger
+	outbox  outbox
+	wake    waker
+	pub     publisher
+	cfg     RelayConfig
+	metrics *Metrics
+	log     *slog.Logger
 }
 
 // NewRelay returns a relay over the given outbox, wake-up source and publisher.
-func NewRelay(o outbox, w waker, p publisher, cfg RelayConfig, log *slog.Logger) *Relay {
-	return &Relay{outbox: o, wake: w, pub: p, cfg: cfg, log: log}
+func NewRelay(o outbox, w waker, p publisher, cfg RelayConfig, metrics *Metrics, log *slog.Logger) *Relay {
+	return &Relay{outbox: o, wake: w, pub: p, cfg: cfg, metrics: metrics, log: log}
 }
 
 // Run relays until ctx ends, then returns nil. It returns an error when publishing or the database fails: the
@@ -77,6 +78,7 @@ func (r *Relay) drain(ctx context.Context) error {
 			return fmt.Errorf("relay the outbox: %w", err)
 		}
 		if n > 0 {
+			r.metrics.published.Add(float64(n))
 			r.log.DebugContext(ctx, "outbox relayed", "published", n)
 		}
 		if n < r.cfg.BatchSize {

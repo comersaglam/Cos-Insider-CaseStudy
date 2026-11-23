@@ -91,7 +91,7 @@ func run(ctx context.Context, args []string, lookup func(string) (string, bool),
 	}
 
 	notifications := notification.NewHandler(notification.NewService(notification.NewStore(pool), log), log, int64(maxBatchBody))
-	srv := httpx.NewServer(httpapi.NewRouter(log, notifications), log)
+	srv := httpx.NewServer(httpapi.NewRouter(log, observability.NewRegistry(), notifications), log)
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)

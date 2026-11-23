@@ -33,6 +33,7 @@ Every decision follows the industry standard where one exists; a departure from 
 | [0023](0023-the-consumer.md) | The consumer: claiming, sending, recording, retrying | Accepted |
 | [0024](0024-circuit-breaker.md) | The circuit breaker | Accepted |
 | [0025](0025-worker-in-compose-and-the-provider-stand-in.md) | The worker in Compose, and a stand-in for the provider | Accepted |
+| [0026](0026-metrics.md) | Metrics: Prometheus for machines, a summary for people | Accepted |
 
 ## Template
 

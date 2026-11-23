@@ -51,6 +51,7 @@ Tests do not need it.
 | RabbitMQ management UI | <http://localhost:15672> | `notifications` / `notifications` |
 | API (after `make up`) | <http://localhost:8080> | none |
 | Stand-in provider (WireMock), its received requests | <http://localhost:8081/__admin/requests> | none |
+| Metrics: API, worker, summary | <http://localhost:8080/metrics>, <http://localhost:9090/metrics>, <http://localhost:8080/v1/metrics> | none |
 
 - `docker compose exec postgres psql -U notifications` opens a SQL shell.
 - To change a port or a password, copy `.env.example` to `.env` and edit it.
